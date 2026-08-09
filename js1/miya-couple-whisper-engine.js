@@ -255,9 +255,11 @@
     parts.push(buildWhisperRulesBlock(charName, isOpening));
 
     var apiMessages = [{ role: 'system', content: parts.join('\n\n') }];
-    var prioritySystemPrompt = String(
-      contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt
-    );
+    var engPriority = chatEngine();
+    var prioritySystemPrompt =
+      engPriority && typeof engPriority.resolveContactPrioritySystemPrompt === 'function'
+        ? engPriority.resolveContactPrioritySystemPrompt(contact)
+        : String(contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt);
     if (prioritySystemPrompt.trim()) {
       apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
     }

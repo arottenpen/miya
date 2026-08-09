@@ -1193,9 +1193,11 @@
                 ? eng.prependUniversalWorldbookMessage(msgs)
                 : msgs;
         })();
-        var prioritySystemPrompt = String(
-            !contact || contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt
-        );
+        var prioritySystemPrompt =
+            global.miyaChatEngine &&
+            typeof global.miyaChatEngine.resolveContactPrioritySystemPrompt === 'function'
+                ? global.miyaChatEngine.resolveContactPrioritySystemPrompt(contact)
+                : String(!contact || contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt);
         if (prioritySystemPrompt.trim()) {
             req.unshift({ role: 'system', content: prioritySystemPrompt });
         }
@@ -1456,11 +1458,15 @@
                 ];
                 (authorIds || []).slice().reverse().forEach(function (authorId) {
                     var author = contactById[authorId];
-                    var prioritySystemPrompt = String(
-                        !author || author.prioritySystemPrompt == null
-                            ? ''
-                            : author.prioritySystemPrompt
-                    );
+                    var prioritySystemPrompt =
+                        global.miyaChatEngine &&
+                        typeof global.miyaChatEngine.resolveContactPrioritySystemPrompt === 'function'
+                            ? global.miyaChatEngine.resolveContactPrioritySystemPrompt(author)
+                            : String(
+                                  !author || author.prioritySystemPrompt == null
+                                      ? ''
+                                      : author.prioritySystemPrompt
+                              );
                     if (prioritySystemPrompt.trim()) {
                         requestMessages.unshift({ role: 'system', content: prioritySystemPrompt });
                     }

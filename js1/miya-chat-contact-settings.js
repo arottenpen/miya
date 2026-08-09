@@ -814,7 +814,7 @@
       : 0;
     var breakdown =
       typeof eng.buildPromptSourceBreakdown === 'function'
-        ? eng.buildPromptSourceBreakdown(built.messages, wb)
+        ? eng.buildPromptSourceBreakdown(built.messages, wb, built.sourceMeta)
         : null;
     var opMod = global.MiyaChatOperationRules;
     var thMod = global.MiyaChatThinkingRules;

@@ -73,22 +73,57 @@
         }
     }
 
+    function collectContactArchiveIds(contact) {
+        if (!contact) return [];
+        var ids = [];
+        var seen = {};
+        [contact.chronicleId, contact.characterId, contact.id].forEach(function (value) {
+            var id = String(value || '').trim();
+            if (!id || seen[id]) return;
+            seen[id] = true;
+            ids.push(id);
+        });
+        return ids;
+    }
+
+    function findContactArchiveRow(contact) {
+        var cs = global.miyaContactsStore;
+        if (!cs || typeof cs.findCharacter !== 'function') return null;
+        var ids = collectContactArchiveIds(contact);
+        for (var i = 0; i < ids.length; i++) {
+            var row = cs.findCharacter(ids[i]);
+            if (row) return row;
+        }
+        return null;
+    }
+
+    function resolveContactPrioritySystemPrompt(contact) {
+        var row = findContactArchiveRow(contact);
+        if (row) {
+            return String(row.prioritySystemPrompt == null ? '' : row.prioritySystemPrompt);
+        }
+        return String(!contact || contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt);
+    }
+
     function renderChronicleBlock(contact) {
         var cs = global.miyaContactsStore;
         if (!cs || !contact) return '';
-        var rid = String(contact.characterId || contact.id || contact.chronicleId || '').trim();
-        if (rid && typeof cs.renderChronicleBlock === 'function') {
-            var fromStore = String(cs.renderChronicleBlock(rid) || '').trim();
-            if (fromStore) return fromStore;
+        var ids = collectContactArchiveIds(contact);
+        for (var i = 0; i < ids.length; i++) {
+            if (typeof cs.renderChronicleBlock === 'function') {
+                var fromStore = String(cs.renderChronicleBlock(ids[i]) || '').trim();
+                if (fromStore) return fromStore;
+            }
+            var row = cs.findCharacter ? cs.findCharacter(ids[i]) : null;
+            if (!row) continue;
+            var lines = ['【角色·档案·' + String(row.name || contact.name) + '】'];
+            if (row.gender) lines.push('- 性别: ' + row.gender);
+            if (row.age) lines.push('- 年龄: ' + row.age);
+            if (row.birthday) lines.push('- 生日: ' + row.birthday);
+            if (row.persona) lines.push('- 人设与背景: ' + row.persona);
+            if (lines.length > 1) return lines.join('\n');
         }
-        var row = cs.findCharacter ? cs.findCharacter(rid) : null;
-        if (!row) return '';
-        var lines = ['【角色·档案·' + String(row.name || contact.name) + '】'];
-        if (row.gender) lines.push('- 性别: ' + row.gender);
-        if (row.age) lines.push('- 年龄: ' + row.age);
-        if (row.birthday) lines.push('- 生日: ' + row.birthday);
-        if (row.persona) lines.push('- 人设与背景: ' + row.persona);
-        return lines.length > 1 ? lines.join('\n') : '';
+        return '';
     }
 
     function renderProfileBlock(profile) {
@@ -711,7 +746,7 @@
 
         appendLayerList(parts, cfg.worldbookFrontLayers);
 
-        var globalP = getGlobalPrompt();
+        var globalP = cfg.globalPrompt != null ? String(cfg.globalPrompt).trim() : getGlobalPrompt();
         if (globalP) parts.push('【全局提示词】\n' + globalP);
 
         parts.push(buildCallModeBlock(contact, profile, callKind));
@@ -753,7 +788,9 @@
 
         parts.push(buildCallFormatRules(contact, callKind));
 
-        return parts.filter(Boolean).join('\n\n');
+        var outputParts = parts.filter(Boolean);
+        var outputText = outputParts.join('\n\n');
+        return cfg.returnParts ? { text: outputText, parts: outputParts } : outputText;
     }
 
     /** 运转规则 1–6：人设与对话风格（可被自定义预设覆盖） */
@@ -1327,7 +1364,7 @@
 
         appendLayerList(parts, cfg.worldbookFrontLayers);
 
-        var globalP = getGlobalPrompt();
+        var globalP = cfg.globalPrompt != null ? String(cfg.globalPrompt).trim() : getGlobalPrompt();
         if (globalP) parts.push('【全局提示词】\n' + globalP);
 
         parts.push(buildChatModeBlock(contact, profile));
@@ -1361,7 +1398,9 @@
 
         parts.push(buildOnlineRulesBundle(contact, chatSettings));
 
-        return parts.filter(Boolean).join('\n\n');
+        var outputParts = parts.filter(Boolean);
+        var outputText = outputParts.join('\n\n');
+        return cfg.returnParts ? { text: outputText, parts: outputParts } : outputText;
     }
 
     /** 线上单聊：联系人档案（含人设与背景）置末注入，紧挨运转规则之前 */
@@ -1915,7 +1954,7 @@
         var sum = 0;
         messages.forEach(function (m) {
             if (!m) return;
-            sum += estimateTokensFromText(m.content);
+            sum += estimateTokensFromText(messageContentText(m));
             if (m.role) sum += 4;
         });
         return sum;
@@ -1927,7 +1966,7 @@
         var sum = 0;
         messages.forEach(function (m) {
             if (!m) return;
-            sum += String(m.content || '').length;
+            sum += messageContentText(m).length;
         });
         return sum;
     }
@@ -1939,11 +1978,12 @@
         var totalChars = 0;
         var systemText = '';
         list.forEach(function (m) {
-            var n = String((m && m.content) || '').length;
+            var contentText = messageContentText(m);
+            var n = contentText.length;
             totalChars += n;
             if (m && m.role === 'system') {
                 systemChars += n;
-                systemText += String(m.content || '') + '\n';
+                systemText += contentText + '\n';
             } else historyChars += n;
         });
         var wb = wbMeta && typeof wbMeta === 'object' ? wbMeta : {};
@@ -1968,6 +2008,8 @@
     }
 
     var PROMPT_SOURCE_LABELS = {
+        priority_prompt: '联系人最高优先级提示词',
+        global_prompt: '旧自由文本全局提示词',
         system_lead: '前置系统指令',
         system_main: '系统主提示（人设/档案/规则）',
         worldbook: '世界书（嵌入系统提示）',
@@ -2016,8 +2058,9 @@
 
     function classifyApiMessageSource(msg, index, messages) {
         var role = msg && msg.role ? msg.role : '';
-        var text = String(messageContentText(msg) || '').trim();
-        var chars = text.length;
+        var bodyText = messageContentText(msg);
+        var text = String(bodyText || '').trim();
+        var chars = bodyText.length;
         function row(key, extra) {
             var out = {
                 key: key,
@@ -2087,18 +2130,11 @@
             if (text.indexOf('【角色·档案·') === 0) {
                 return row('chronicle');
             }
-            var firstSystemIdx = -1;
-            for (var si = 0; si < messages.length; si++) {
-                if (messages[si] && messages[si].role === 'system') {
-                    firstSystemIdx = si;
-                    break;
-                }
-            }
             if (
-                index === firstSystemIdx &&
-                (text.indexOf('【运转规则') >= 0 ||
-                    text.indexOf('【全局提示词】') >= 0 ||
-                    text.indexOf('【对话模式') >= 0)
+                text.indexOf('【对话模式·线上单聊】') >= 0 ||
+                text.indexOf('【对话模式·实时语音通话】') >= 0 ||
+                text.indexOf('【对话模式·实时视频通话】') >= 0 ||
+                text.indexOf('【对话模式·群聊】') >= 0
             ) {
                 return row('system_main', { isMainSystem: true });
             }
@@ -2110,17 +2146,215 @@
         return row('unknown');
     }
 
+    function buildSourceSegmentsFromParts(parts) {
+        var list = Array.isArray(parts) ? parts : [];
+        var segments = [];
+        list.forEach(function (part, index) {
+            var text = String(part && part.text != null ? part.text : '');
+            var key = part && part.key ? part.key : 'system_main';
+            if (index > 0) {
+                segments.push({
+                    key: 'system_main',
+                    label: PROMPT_SOURCE_LABELS.system_main,
+                    chars: 2,
+                    preview: '\n\n'
+                });
+            }
+            if (text) {
+                segments.push({
+                    key: key,
+                    label: PROMPT_SOURCE_LABELS[key] || key,
+                    chars: text.length,
+                    preview: text.slice(0, 160)
+                });
+            }
+        });
+        return segments;
+    }
+
+    function buildKnownSystemSourceParts(parts, globalPrompt, frontLayers, middleLayers) {
+        var sourceParts = [];
+        var globalText = String(globalPrompt || '').trim();
+        var globalBlocks = globalText
+            ? ['【全局提示词】\n' + globalText, '【全局】\n' + globalText]
+            : [];
+        var front = normalizeLayerList(frontLayers);
+        var middle = normalizeLayerList(middleLayers);
+        var frontLeft = front.slice();
+        var middleLeft = middle.slice();
+        var globalLeft = globalBlocks.slice();
+        (Array.isArray(parts) ? parts : []).forEach(function (part) {
+            var text = String(part || '');
+            var key = 'system_main';
+            var fi = frontLeft.indexOf(text);
+            if (fi >= 0) {
+                frontLeft.splice(fi, 1);
+                key = 'worldbook';
+            } else {
+                var globalIndex = globalLeft.indexOf(text);
+                if (globalIndex >= 0) {
+                    globalLeft.splice(globalIndex, 1);
+                    key = 'global_prompt';
+                }
+                if (key === 'global_prompt') {
+                    sourceParts.push({ key: key, text: text });
+                    return;
+                }
+                var mi = middleLeft.indexOf(text);
+                if (mi >= 0) {
+                    middleLeft.splice(mi, 1);
+                    key = 'worldbook';
+                }
+            }
+            sourceParts.push({ key: key, text: text });
+        });
+        return sourceParts;
+    }
+
+    function buildCompletePromptSourceMeta(messages, hints) {
+        var list = Array.isArray(messages) ? messages : [];
+        var cfg = hints && typeof hints === 'object' ? hints : {};
+        var byMessage = [];
+        var mainMessage = cfg.mainMessage;
+        var mainSegments = Array.isArray(cfg.mainSegments) ? cfg.mainSegments : null;
+        var priorityMessages = Array.isArray(cfg.priorityMessages) ? cfg.priorityMessages : [];
+        var worldbookBackMessages = Array.isArray(cfg.worldbookBackMessages) ? cfg.worldbookBackMessages : [];
+        var prioritySet = [];
+        var worldbookBackSet = [];
+        priorityMessages.forEach(function (m) { if (m) prioritySet.push(m); });
+        worldbookBackMessages.forEach(function (m) { if (m) worldbookBackSet.push(m); });
+        list.forEach(function (message, index) {
+            var src = classifyApiMessageSource(message, index, list);
+            if (message === mainMessage) {
+                src.key = 'system_main';
+                src.label = PROMPT_SOURCE_LABELS.system_main;
+                src.isMainSystem = true;
+                if (mainSegments && mainSegments.length) src.segments = mainSegments.slice();
+            } else if (prioritySet.indexOf(message) >= 0) {
+                src.key = 'priority_prompt';
+                src.label = PROMPT_SOURCE_LABELS.priority_prompt;
+            } else if (worldbookBackSet.indexOf(message) >= 0) {
+                src.key = 'worldbook';
+                src.label = PROMPT_SOURCE_LABELS.worldbook;
+            }
+            if (!Array.isArray(src.segments) || !src.segments.length) {
+                src.segments = [{
+                    key: src.key || 'unknown',
+                    label: PROMPT_SOURCE_LABELS[src.key] || src.key || 'unknown',
+                    chars: src.chars,
+                    preview: src.preview
+                }];
+            }
+            var actualChars = messageContentText(message).length;
+            var segmentChars = src.segments.reduce(function (sum, segment) {
+                return sum + Math.max(0, Number(segment && segment.chars) || 0);
+            }, 0);
+            if (segmentChars !== actualChars) {
+                src.segments = [{
+                    key: src.key || 'unknown',
+                    label: PROMPT_SOURCE_LABELS[src.key] || src.key || 'unknown',
+                    chars: actualChars,
+                    preview: src.preview
+                }];
+            }
+            src.chars = actualChars;
+            src.tokens = estimateTokensFromCharCount(actualChars);
+            byMessage[index] = src;
+        });
+        return {
+            messages: byMessage,
+            messageSources: byMessage.map(function (src) {
+                return { key: src.key, label: src.label, chars: src.chars };
+            })
+        };
+    }
+
+    function finalizePromptSourceMeta(messages, sourceMeta) {
+        var meta = sourceMeta && typeof sourceMeta === 'object' ? sourceMeta : {};
+        var complete = buildCompletePromptSourceMeta(messages, {
+            mainMessage: meta.mainMessage,
+            mainSegments: meta.mainSegments,
+            priorityMessages: meta.priorityMessages,
+            worldbookBackMessages: meta.worldbookBackMessages
+        });
+        meta.messages = complete.messages;
+        meta.messageSources = complete.messageSources;
+        delete meta.mainMessage;
+        delete meta.mainSegments;
+        delete meta.priorityMessages;
+        delete meta.worldbookBackMessages;
+        return meta;
+    }
+
     /** 按来源分区统计 prompt 字符/token（供设置页展示） */
-    function buildPromptSourceBreakdown(apiMessages, wbMeta) {
+    function buildPromptSourceBreakdown(apiMessages, wbMeta, sourceMeta) {
         var list = Array.isArray(apiMessages) ? apiMessages : [];
         var wb = wbMeta && typeof wbMeta === 'object' ? wbMeta : {};
+        var meta = sourceMeta && typeof sourceMeta === 'object' ? sourceMeta : null;
+        var messageSources = meta && Array.isArray(meta.messageSources) ? meta.messageSources : [];
         var wbChars = Number(wb.injectedChars != null ? wb.injectedChars : wb.chars) || 0;
         var rawItems = [];
         var mainSystemAdjusted = false;
+        var completeMessages =
+            meta && Array.isArray(meta.messages) && meta.messages.length === list.length &&
+            meta.messages.every(function (item) { return item && item.key; });
 
         list.forEach(function (m, i) {
+            if (completeMessages) {
+                var complete = meta.messages[i];
+                var completeSegments = Array.isArray(complete.segments) ? complete.segments : [];
+                completeSegments.forEach(function (segment) {
+                    var segmentChars = Math.max(0, Number(segment && segment.chars) || 0);
+                    if (!segmentChars) return;
+                    var segmentKey = segment.key || complete.key || 'unknown';
+                    rawItems.push({
+                        key: segmentKey,
+                        label: PROMPT_SOURCE_LABELS[segmentKey] || segment.label || segmentKey,
+                        chars: segmentChars,
+                        tokens: estimateTokensFromCharCount(segmentChars),
+                        preview: String(segment.preview || complete.preview || '')
+                    });
+                });
+                return;
+            }
             var src = classifyApiMessageSource(m, i, list);
-            if (src.isMainSystem && wbChars > 0 && src.chars > wbChars) {
+            var explicit = messageSources[i];
+            if (explicit && explicit.key && explicit.key !== 'system_main') {
+                src.key = explicit.key;
+                src.label = PROMPT_SOURCE_LABELS[explicit.key] || explicit.key;
+                src.isMainSystem = false;
+                rawItems.push(src);
+                return;
+            }
+            if (explicit && explicit.key === 'system_main') src.isMainSystem = true;
+            if (src.isMainSystem && meta && Array.isArray(meta.mainSystemSources)) {
+                var allocated = 0;
+                meta.mainSystemSources.forEach(function (part) {
+                    var partChars = Math.max(0, Number(part && part.chars) || 0);
+                    if (!part || !part.key || !partChars) return;
+                    partChars = Math.min(partChars, Math.max(0, src.chars - allocated));
+                    if (!partChars) return;
+                    allocated += partChars;
+                    rawItems.push({
+                        key: part.key,
+                        label: PROMPT_SOURCE_LABELS[part.key] || part.key,
+                        chars: partChars,
+                        tokens: estimateTokensFromCharCount(partChars),
+                        preview: String(part.preview || '')
+                    });
+                });
+                var remaining = Math.max(0, src.chars - allocated);
+                if (remaining) {
+                    rawItems.push({
+                        key: 'system_main',
+                        label: PROMPT_SOURCE_LABELS.system_main,
+                        chars: remaining,
+                        tokens: estimateTokensFromCharCount(remaining),
+                        preview: src.preview
+                    });
+                }
+                mainSystemAdjusted = true;
+            } else if (src.isMainSystem && wbChars > 0 && src.chars > wbChars) {
                 var mainChars = src.chars - wbChars;
                 var wbTokens = estimateTokensFromCharCount(wbChars);
                 rawItems.push({
@@ -2152,7 +2386,7 @@
             }
         });
 
-        if (!mainSystemAdjusted && wbChars > 0) {
+        if (!completeMessages && !meta && !mainSystemAdjusted && wbChars > 0) {
             rawItems.push({
                 key: 'worldbook',
                 label: PROMPT_SOURCE_LABELS.worldbook,
@@ -2192,6 +2426,18 @@
 
         var promptChars = countMessagesChars(list);
         var promptTokens = estimateMessagesTokens(list);
+        var sourceChars = rawItems.reduce(function (sum, item) {
+            return sum + (Number(item && item.chars) || 0);
+        }, 0);
+        if (sourceChars < promptChars) {
+            rawItems.push({
+                key: 'system_main',
+                label: PROMPT_SOURCE_LABELS.system_main,
+                chars: promptChars - sourceChars,
+                tokens: estimateTokensFromCharCount(promptChars - sourceChars),
+                preview: ''
+            });
+        }
 
         return {
             sources: rawItems,
@@ -2210,7 +2456,7 @@
         var systemText = '';
         var totalChars = 0;
         list.forEach(function (m) {
-            var c = String((m && m.content) || '');
+            var c = messageContentText(m);
             totalChars += c.length;
             if (m && m.role === 'system') systemText += c + '\n';
         });
@@ -2221,11 +2467,12 @@
         else if (opIdx >= 0) snippet = systemText.slice(opIdx, opIdx + 600);
         var hasHvRules = hvIdx >= 0 || /miyavoice|heartvoice|心声段/i.test(systemText);
         var slim = list.map(function (m, i) {
+            var contentText = messageContentText(m);
             return {
                 i: i,
                 role: m && m.role ? m.role : '',
-                chars: String((m && m.content) || '').length,
-                content: String((m && m.content) || '')
+                chars: contentText.length,
+                content: contentText
             };
         });
         var json = '';
@@ -2654,7 +2901,8 @@
             promptContext: 'online',
             includeAllBoundLocal: true
         });
-        var systemContent = opts.callMode
+        var globalPrompt = getGlobalPrompt();
+        var systemBuild = opts.callMode
             ? buildCallSystemPrompt({
                   contact: contact,
                   profile: profile,
@@ -2664,7 +2912,8 @@
                   worldbookFrontLayers: wbBundle.frontLayers,
                   worldbookLayers: wbBundle.layers,
                   worldbookBackLayers: wbBundle.backLayers,
-                  callKind: opts.callKind
+                  callKind: opts.callKind,
+                  globalPrompt: globalPrompt
               })
             : buildSystemPrompt({
                   contact: contact,
@@ -2673,8 +2922,18 @@
                   chatSettings: settings,
                   history: sliceContext,
                   worldbookFrontLayers: wbBundle.frontLayers,
-                  worldbookLayers: wbBundle.layers
+                  worldbookLayers: wbBundle.layers,
+                  globalPrompt: globalPrompt,
+                  returnParts: true
               });
+        var systemContent = systemBuild && typeof systemBuild === 'object' ? systemBuild.text : systemBuild;
+        var systemParts = systemBuild && typeof systemBuild === 'object' ? systemBuild.parts : [systemContent];
+        var mainSystemParts = buildKnownSystemSourceParts(
+            systemParts,
+            globalPrompt,
+            wbBundle.frontLayers,
+            wbBundle.layers
+        );
 
         if (wbBundle.meta) {
             var systemLayers = []
@@ -2698,8 +2957,11 @@
             typeof htmlApi.detectHtmlModeFromWorldbook === 'function' &&
             htmlApi.detectHtmlModeFromWorldbook(wbBundle);
         if (htmlMode) {
-            systemContent =
-                systemContent + '\n\n' + htmlApi.buildHtmlGenerationRules({ mode: 'online', fromWorldbook: true });
+            var htmlRules = htmlApi.buildHtmlGenerationRules({ mode: 'online', fromWorldbook: true });
+            if (htmlRules) {
+                systemContent = systemContent + '\n\n' + htmlRules;
+                mainSystemParts.push({ key: 'system_main', text: String(htmlRules) });
+            }
         }
 
         var ggMem = global.MiyaChatGroup;
@@ -2717,15 +2979,20 @@
             );
             if (groupMemBlock) {
                 systemContent = systemContent + '\n\n' + groupMemBlock;
+                mainSystemParts.push({ key: 'system_main', text: String(groupMemBlock) });
             }
         }
 
-        var apiMessages = [{ role: 'system', content: systemContent }];
-        var prioritySystemPrompt = String(
-            contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt
-        );
+        var mainSystemMessage = { role: 'system', content: systemContent };
+        var apiMessages = [mainSystemMessage];
+        var prioritySystemPrompt = resolveContactPrioritySystemPrompt(contact);
+        var priorityMessageCount = 0;
+        var priorityMessages = [];
         if (prioritySystemPrompt.trim()) {
-            apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+            var priorityMessage = { role: 'system', content: prioritySystemPrompt };
+            apiMessages.unshift(priorityMessage);
+            priorityMessages.push(priorityMessage);
+            priorityMessageCount = 1;
         }
         var awInject = global.MiyaChatAwareness;
         var summaryBlock =
@@ -3063,8 +3330,14 @@
             }
         }
 
+        var worldbookBackStart = -1;
+        var worldbookBackCount = 0;
+        var worldbookBackMessages = [];
         if (!opts.callMode && !opts.appointmentMode) {
+            worldbookBackStart = apiMessages.length;
             appendWorldbookBackMessages(apiMessages, wbBundle.backLayers);
+            worldbookBackCount = normalizeLayerList(wbBundle.backLayers).length;
+            worldbookBackMessages = apiMessages.slice(worldbookBackStart);
         }
         appendChronicleBeforeOperationRulesMessage(apiMessages, contact, opts);
         if (
@@ -3121,8 +3394,19 @@
             Object.assign({}, opts, { chatSettings: settings })
         );
 
+        var completeSourceMeta = buildCompletePromptSourceMeta(apiMessages, {
+            mainMessage: mainSystemMessage,
+            mainSegments: buildSourceSegmentsFromParts(mainSystemParts),
+            priorityMessages: priorityMessages,
+            worldbookBackMessages: worldbookBackMessages
+        });
+
         return {
             messages: apiMessages,
+            sourceMeta: {
+                messages: completeSourceMeta.messages,
+                messageSources: completeSourceMeta.messageSources
+            },
             contact: contact,
             profile: profile,
             chat: chat,
@@ -4712,6 +4996,11 @@
         ensureWorldbookDepsReady: ensureWorldbookDepsReady,
         buildWorldbookBundle: buildWorldbookBundle,
         buildSystemPrompt: buildSystemPrompt,
+        messageContentText: messageContentText,
+        buildCompletePromptSourceMeta: buildCompletePromptSourceMeta,
+        buildSourceSegmentsFromParts: buildSourceSegmentsFromParts,
+        findContactArchiveRow: findContactArchiveRow,
+        resolveContactPrioritySystemPrompt: resolveContactPrioritySystemPrompt,
         buildApiMessages: buildApiMessages,
         setPendingOnlineReturnPrompt: function (chatId, text) {
             var key = String(chatId || '').trim();

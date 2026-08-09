@@ -1071,7 +1071,7 @@
             var t = trim(layer);
             if (t) parts.push(t);
         });
-        var gp = trim(getGlobalPrompt());
+        var gp = cfg.globalPrompt != null ? trim(cfg.globalPrompt) : trim(getGlobalPrompt());
         if (gp) parts.push('【全局】\n' + gp);
         parts.push(buildGroupModeBlock(chat, members, profile));
         var nickBlock = buildGroupNicknamesBlock(members, store, chat.id);
@@ -1137,7 +1137,42 @@
             var stickerCat = collectStickerCatalog(store, members);
             parts.push(fmt.buildStickerAllowlistBlock(stickerCat, '群聊成员'));
         }
-        return parts.filter(Boolean).join('\n\n');
+        var outputParts = parts.filter(Boolean);
+        var outputText = outputParts.join('\n\n');
+        return cfg.returnParts ? { text: outputText, parts: outputParts } : outputText;
+    }
+
+    function buildGroupSystemSourceSegments(parts, globalPrompt, frontLayers, middleLayers, eng) {
+        var sourceParts = [];
+        var globalText = trim(globalPrompt);
+        var globalBlocks = globalText ? ['【全局】\n' + globalText, '【全局提示词】\n' + globalText] : [];
+        var frontLeft = (frontLayers || []).map(trim).filter(Boolean);
+        var middleLeft = (middleLayers || []).map(trim).filter(Boolean);
+        (Array.isArray(parts) ? parts : []).forEach(function (part) {
+            var text = String(part || '');
+            var key = 'system_main';
+            var fi = frontLeft.indexOf(text);
+            if (fi >= 0) {
+                frontLeft.splice(fi, 1);
+                key = 'worldbook';
+            } else {
+                var gi = globalBlocks.indexOf(text);
+                if (gi >= 0) {
+                    globalBlocks.splice(gi, 1);
+                    key = 'global_prompt';
+                } else {
+                    var mi = middleLeft.indexOf(text);
+                    if (mi >= 0) {
+                        middleLeft.splice(mi, 1);
+                        key = 'worldbook';
+                    }
+                }
+            }
+            sourceParts.push({ key: key, text: text });
+        });
+        return eng && typeof eng.buildSourceSegmentsFromParts === 'function'
+            ? eng.buildSourceSegmentsFromParts(sourceParts)
+            : [];
     }
 
     function buildApiMessages(chatId, userText, opts) {
@@ -1184,23 +1219,36 @@
             .filter(Boolean)
             .join('\n');
         var wbBundle = buildGroupWorldbookBundle(members, contextText + '\n' + trim(userText), settings);
-        var systemContent = buildGroupSystemPrompt({
+        var groupGlobalPrompt = trim(getGlobalPrompt());
+        var systemBuild = buildGroupSystemPrompt({
             chat: chat,
             members: members,
             profile: profile,
             store: store,
             history: slice,
             worldbookFrontLayers: wbBundle.frontLayers,
-            worldbookLayers: wbBundle.layers
+            worldbookLayers: wbBundle.layers,
+            globalPrompt: groupGlobalPrompt,
+            returnParts: true
         });
+        var systemContent = systemBuild && typeof systemBuild === 'object' ? systemBuild.text : systemBuild;
+        var systemParts = systemBuild && typeof systemBuild === 'object' ? systemBuild.parts : [systemContent];
 
-        var apiMessages = [{ role: 'system', content: systemContent }];
+        var mainSystemMessage = { role: 'system', content: systemContent };
+        var apiMessages = [mainSystemMessage];
+        var engPriority = global.miyaChatEngine;
+        var priorityMessageCount = 0;
+        var priorityMessages = [];
         members.slice().reverse().forEach(function (member) {
-            var prioritySystemPrompt = String(
-                !member || member.prioritySystemPrompt == null ? '' : member.prioritySystemPrompt
-            );
+            var prioritySystemPrompt =
+                engPriority && typeof engPriority.resolveContactPrioritySystemPrompt === 'function'
+                    ? engPriority.resolveContactPrioritySystemPrompt(member)
+                    : String(!member || member.prioritySystemPrompt == null ? '' : member.prioritySystemPrompt);
             if (prioritySystemPrompt.trim()) {
-                apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+                var priorityMessage = { role: 'system', content: prioritySystemPrompt };
+                apiMessages.unshift(priorityMessage);
+                priorityMessages.push(priorityMessage);
+                priorityMessageCount += 1;
             }
         });
         var aw = global.MiyaChatAwareness;
@@ -1264,6 +1312,11 @@
         }
 
         var engWb = global.miyaChatEngine;
+        var worldbookBackStart = apiMessages.length;
+        var worldbookBackCount = (wbBundle.backLayers || []).filter(function (layer) {
+            return !!trim(layer);
+        }).length;
+        var worldbookBackMessages;
         if (engWb && typeof engWb.appendWorldbookBackMessages === 'function') {
             engWb.appendWorldbookBackMessages(apiMessages, wbBundle.backLayers);
         } else {
@@ -1272,6 +1325,7 @@
                 if (t) apiMessages.push({ role: 'system', content: t });
             });
         }
+        worldbookBackMessages = apiMessages.slice(worldbookBackStart);
 
         apiMessages.push({
             role: 'system',
@@ -1313,12 +1367,37 @@
         }
         var totalChars = 0;
         apiMessages.forEach(function (m) {
-            if (m && m.content) totalChars += String(m.content).length;
+            if (!m) return;
+            if (engPm && typeof engPm.messageContentText === 'function') {
+                totalChars += engPm.messageContentText(m).length;
+            } else if (m.content) {
+                totalChars += String(m.content).length;
+            }
         });
         promptMeta.total_prompt_chars = totalChars;
 
+        var completeSourceMeta =
+            engPm && typeof engPm.buildCompletePromptSourceMeta === 'function'
+                ? engPm.buildCompletePromptSourceMeta(apiMessages, {
+                      mainMessage: mainSystemMessage,
+                      mainSegments: buildGroupSystemSourceSegments(
+                          systemParts,
+                          groupGlobalPrompt,
+                          wbBundle.frontLayers,
+                          wbBundle.layers,
+                          engPm
+                      ),
+                      priorityMessages: priorityMessages,
+                      worldbookBackMessages: worldbookBackMessages
+                  })
+                : null;
+
         return {
             messages: apiMessages,
+            sourceMeta: {
+                messages: completeSourceMeta ? completeSourceMeta.messages : [],
+                messageSources: completeSourceMeta ? completeSourceMeta.messageSources : []
+            },
             contact: null,
             profile: profile,
             chat: chat,

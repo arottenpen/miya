@@ -20,7 +20,8 @@
       parts.push(
         ch.id + ':' + String(ch.updatedAt || 0) + ':' +
         String(ch.name || '') + ':' + String(ch.groupId || '') + ':' +
-        String(ch.avatar || '').slice(0, 64)
+        String(ch.avatar || '').slice(0, 64) + ':' +
+        String(ch.prioritySystemPrompt == null ? '' : ch.prioritySystemPrompt)
       );
     });
     return parts.join('|');
@@ -32,6 +33,8 @@
       existing.characterId !== (character.characterId || character.id) ||
       existing.groupId !== chatGroupId ||
       existing.name !== character.name ||
+      String(existing.prioritySystemPrompt == null ? '' : existing.prioritySystemPrompt) !==
+        String(character.prioritySystemPrompt == null ? '' : character.prioritySystemPrompt) ||
       String(existing.avatar || '').trim() !== String(character.avatar || '').trim();
   }
 
@@ -97,6 +100,9 @@
     var patch = {
       chronicleId: character.id,
       characterId: character.characterId || character.id,
+      prioritySystemPrompt: String(
+        character.prioritySystemPrompt == null ? '' : character.prioritySystemPrompt
+      ),
       name: character.name,
       avatar: String(character.avatar || '').trim(),
       groupId: chatGroupId

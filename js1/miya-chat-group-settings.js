@@ -403,7 +403,7 @@
     var wbStore = global.miyaWorldbookStore;
     var totalInStore = wbStore && typeof wbStore.listEntries === 'function' ? wbStore.listEntries().length : 0;
     var breakdown = typeof eng.buildPromptSourceBreakdown === 'function'
-      ? eng.buildPromptSourceBreakdown(built.messages, wb) : null;
+      ? eng.buildPromptSourceBreakdown(built.messages, wb, built.sourceMeta) : null;
     var chat = store && store.findChat ? store.findChat(chatId) : null;
     var lastUsage = chat && chat.lastTokenUsage ? chat.lastTokenUsage : null;
     var activeThinking = chat && chat.activeThinking ? String(chat.activeThinking).trim() : '';

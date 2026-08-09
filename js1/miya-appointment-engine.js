@@ -852,11 +852,14 @@
         });
         apiMessages.push({ role: 'system', content: systemContent });
         castContacts.slice().reverse().forEach(function (castContact) {
-            var prioritySystemPrompt = String(
-                !castContact || castContact.prioritySystemPrompt == null
-                    ? ''
-                    : castContact.prioritySystemPrompt
-            );
+            var prioritySystemPrompt =
+                engRef && typeof engRef.resolveContactPrioritySystemPrompt === 'function'
+                    ? engRef.resolveContactPrioritySystemPrompt(castContact)
+                    : String(
+                          !castContact || castContact.prioritySystemPrompt == null
+                              ? ''
+                              : castContact.prioritySystemPrompt
+                      );
             if (prioritySystemPrompt.trim()) {
                 apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
             }

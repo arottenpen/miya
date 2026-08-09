@@ -1497,6 +1497,9 @@
             id: String(raw && raw.id ? raw.id : uid('ct')),
             chronicleId: String((raw && raw.chronicleId) || '').trim(),
             characterId: String((raw && raw.characterId) || '').trim(),
+            prioritySystemPrompt: String(
+                raw && raw.prioritySystemPrompt != null ? raw.prioritySystemPrompt : ''
+            ),
             groupId: String((raw && raw.groupId) || 'ct-default').trim() || 'ct-default',
             name: String((raw && raw.name) || '').trim(),
             remarkName: String((raw && raw.remarkName) || '').trim(),
@@ -3923,6 +3926,11 @@
                         defaultProfileId: profileId || existing.defaultProfileId,
                         chronicleId: chronicleRow.id,
                         characterId: chronicleRow.characterId || chronicleRow.id,
+                        prioritySystemPrompt: String(
+                            chronicleRow.prioritySystemPrompt == null
+                                ? ''
+                                : chronicleRow.prioritySystemPrompt
+                        ),
                         name: chronicleRow.name || existing.name,
                         avatar: trimContactAvatarForStore(chronicleRow.avatar || existing.avatar)
                     });
@@ -3930,6 +3938,11 @@
                 var c = normalizeContact({
                     chronicleId: chronicleRow.id,
                     characterId: chronicleRow.characterId || chronicleRow.id,
+                    prioritySystemPrompt: String(
+                        chronicleRow.prioritySystemPrompt == null
+                            ? ''
+                            : chronicleRow.prioritySystemPrompt
+                    ),
                     groupId: groupId || 'ct-default',
                     name: chronicleRow.name,
                     avatar: trimContactAvatarForStore(chronicleRow.avatar),
