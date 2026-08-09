@@ -304,6 +304,7 @@
       gender: '',
       birthday: '',
       persona: '',
+      prioritySystemPrompt: '',
       avatar: ''
     };
     editingId = isNew ? null : data.id;
@@ -315,6 +316,7 @@
     $('miya-ct-field-gender').value = data.gender || '';
     $('miya-ct-field-birthday').value = data.birthday || '';
     $('miya-ct-field-persona').value = data.persona || '';
+    $('miya-ct-field-priority-system-prompt').value = data.prioritySystemPrompt || '';
     fillGroupSelect(data.groupId || store.DEFAULT_GROUP_ID);
 
     var img = $('miya-ct-portrait-img');
@@ -351,6 +353,7 @@
       gender: ($('miya-ct-field-gender').value || '').trim(),
       birthday: ($('miya-ct-field-birthday').value || '').trim(),
       persona: ($('miya-ct-field-persona').value || '').trim(),
+      prioritySystemPrompt: $('miya-ct-field-priority-system-prompt').value || '',
       avatar: draftAvatar || ''
     };
     if (groupVal === '__new__') {
@@ -472,6 +475,7 @@
           gender: ch.gender || '',
           birthday: ch.birthday || '',
           persona: ch.persona || '',
+          prioritySystemPrompt: '',
           avatar: ch.avatar || ''
         });
         toast('已解析角色卡，确认后可封存');

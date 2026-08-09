@@ -255,6 +255,12 @@
     parts.push(buildWhisperRulesBlock(charName, isOpening));
 
     var apiMessages = [{ role: 'system', content: parts.join('\n\n') }];
+    var prioritySystemPrompt = String(
+      contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt
+    );
+    if (prioritySystemPrompt.trim()) {
+      apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+    }
 
     if (session && Array.isArray(session.lines) && session.lines.length) {
       var transcript = session.lines.map(formatLineForApi).filter(Boolean).join('\n');

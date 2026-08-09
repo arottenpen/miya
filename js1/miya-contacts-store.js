@@ -70,6 +70,7 @@
       gender: String((raw && raw.gender) || '').trim(),
       birthday: String((raw && raw.birthday) || '').trim(),
       persona: buildPersona(raw),
+      prioritySystemPrompt: String((raw && raw.prioritySystemPrompt) || ''),
       tags: Array.isArray(raw && raw.tags) ? raw.tags.map(String).filter(Boolean) : [],
       updatedAt: Number(raw && raw.updatedAt) || Date.now()
     };

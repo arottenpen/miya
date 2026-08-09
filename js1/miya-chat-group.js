@@ -1195,6 +1195,14 @@
         });
 
         var apiMessages = [{ role: 'system', content: systemContent }];
+        members.slice().reverse().forEach(function (member) {
+            var prioritySystemPrompt = String(
+                !member || member.prioritySystemPrompt == null ? '' : member.prioritySystemPrompt
+            );
+            if (prioritySystemPrompt.trim()) {
+                apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+            }
+        });
         var aw = global.MiyaChatAwareness;
         var summaryBlock =
             aw && typeof aw.buildSummaryContextBlock === 'function'

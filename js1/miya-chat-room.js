@@ -312,7 +312,7 @@
     closeMsgMenu();
   }
 
-  var PLUS_TOOL_KEYS = ['transfer', 'takeout', 'gift', 'location', 'call', 'clock', 'narration', 'thinking', 'lovePoem'];
+  var PLUS_TOOL_KEYS = ['transfer', 'takeout', 'gift', 'location', 'call', 'clock', 'narration', 'thinking', 'lovePoem', 'requestPreview'];
   var GROUP_TOOL_KEYS = ['image', 'redo', 'mic', 'emoji', 'groupRedPacket'];
   var TOOL_KEYS = ['image', 'redo', 'mic', 'emoji'].concat(PLUS_TOOL_KEYS);
   var AI_STAR_SVG =
@@ -370,6 +370,7 @@
       '</svg>',
     thinking: THINK_CLOUD_SVG,
     lovePoem: LOVE_POEM_SVG,
+    requestPreview: '<svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>',
     groupRedPacket:
       '<svg viewBox="0 0 24 24" aria-hidden="true">' +
       '<rect x="3" y="6" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
@@ -392,6 +393,7 @@
     narration: '旁白模式',
     thinking: '思维链',
     lovePoem: '情诗',
+    requestPreview: '本轮最后一次实际请求',
     groupRedPacket: '红包'
   };
 
@@ -3678,6 +3680,43 @@
     });
   }
 
+  function openRequestPreview() {
+    closeEmojiPanel();
+    var ov = $('qq-room-overlay');
+    if (!ov) return;
+    var chat = store && state.chatId ? store.findChat(state.chatId) : null;
+    var snap = chat && chat.lastRequestPreview;
+    var messages = snap && Array.isArray(snap.messages) ? snap.messages : [];
+    var structure = messages.length ? messages.map(function (m, i) {
+      var content = m && m.content !== null && typeof m.content === 'object'
+        ? JSON.stringify(m.content, null, 2)
+        : String(m && m.content != null ? m.content : '');
+      return '<article class="qq-request-preview__message"><div class="qq-request-preview__meta">' +
+        (i + 1) + ' · ' + esc(m.role) + ' · ' + content.length + ' 字符</div><pre>' + esc(content) + '</pre></article>';
+    }).join('') : '<p class="qq-request-preview__empty">还没有可查看的本轮最后一次请求尝试。</p>';
+    var json = snap ? JSON.stringify({
+      messages: messages,
+      settings: snap.settings || {},
+      updatedAt: snap.updatedAt || 0,
+      status: snap.status || ''
+    }, null, 2) : '';
+    var settings = snap && snap.settings ? snap.settings : null;
+    ov.innerHTML = '<div class="qq-sheet qq-request-preview" role="dialog" aria-modal="true">' +
+      sheetGrabHead('REQUEST PREVIEW', '本轮最后一次实际请求', settings ? 'model ' + esc(settings.model || '未记录') + ' · temperature ' + esc(settings.temperature) : '请求尝试失败后仍保留快照') +
+      '<div class="qq-request-preview__tabs"><button type="button" class="is-active" data-request-view="structure">结构</button><button type="button" data-request-view="json">原始 JSON</button></div>' +
+      '<div class="qq-request-preview__body" data-request-body>' + structure + '</div>' +
+      '<button type="button" class="qq-sheet__cancel" data-sheet-close>关闭</button></div>';
+    ov.hidden = false;
+    var body = ov.querySelector('[data-request-body]');
+    ov.querySelectorAll('[data-request-view]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var isJson = btn.getAttribute('data-request-view') === 'json';
+        body.innerHTML = isJson ? '<pre class="qq-request-preview__json">' + esc(json || '暂无') + '</pre>' : structure;
+        ov.querySelectorAll('[data-request-view]').forEach(function (tab) { tab.classList.toggle('is-active', tab === btn); });
+      });
+    });
+  }
+
   function openLovePoemPicker() {
     if (isGroupRoom()) {
       toast('情诗仅支持单聊');
@@ -4456,6 +4495,7 @@
     else if (key === 'clock') toggleTimestamps();
     else if (key === 'narration') toggleNarrationMode();
     else if (key === 'lovePoem') openLovePoemPicker();
+    else if (key === 'requestPreview') openRequestPreview();
   }
 
   function toggleTimestamps() {
@@ -5156,6 +5196,7 @@
       if (t.closest('[data-plus="narration"]')) { e.preventDefault(); toggleNarrationMode(); return; }
       if (t.closest('[data-plus="thinking"]')) { e.preventDefault(); openThinkingPop(); return; }
       if (t.closest('[data-plus="lovePoem"]')) { e.preventDefault(); openLovePoemPicker(); return; }
+      if (t.closest('[data-plus="requestPreview"]')) { e.preventDefault(); openRequestPreview(); return; }
       if (t.closest('#qq-room-tools-toggle')) { e.preventDefault(); toggleToolbarPanel(); return; }
       var tool = t.closest('[data-qq-tool]');
       if (tool) { e.preventDefault(); handleTool(tool.getAttribute('data-qq-tool')); return; }

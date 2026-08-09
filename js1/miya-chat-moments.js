@@ -1193,6 +1193,12 @@
                 ? eng.prependUniversalWorldbookMessage(msgs)
                 : msgs;
         })();
+        var prioritySystemPrompt = String(
+            !contact || contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt
+        );
+        if (prioritySystemPrompt.trim()) {
+            req.unshift({ role: 'system', content: prioritySystemPrompt });
+        }
         var r = await fetch(base + '/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey },
@@ -1438,22 +1444,34 @@
                 ].filter(Boolean).join('\n');
             }
 
-            async function requestEvents(promptText) {
+            async function requestEvents(promptText, authorIds) {
+                var requestMessages = [
+                    { role: 'system', content: '朋友圈批量互动生成器，严格按角色人设与可见性；多人评论区须模拟角色间互评与楼中楼。' },
+                    {
+                        role: 'user',
+                        content: mediaBundle.imageParts.length
+                            ? [{ type: 'text', text: promptText }].concat(mediaBundle.imageParts)
+                            : promptText
+                    }
+                ];
+                (authorIds || []).slice().reverse().forEach(function (authorId) {
+                    var author = contactById[authorId];
+                    var prioritySystemPrompt = String(
+                        !author || author.prioritySystemPrompt == null
+                            ? ''
+                            : author.prioritySystemPrompt
+                    );
+                    if (prioritySystemPrompt.trim()) {
+                        requestMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+                    }
+                });
                 var r = await fetch(base + '/chat/completions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey },
                     body: JSON.stringify({
                         model: model,
                         temperature: 0.8,
-                        messages: [
-                            { role: 'system', content: '朋友圈批量互动生成器，严格按角色人设与可见性；多人评论区须模拟角色间互评与楼中楼。' },
-                            {
-                                role: 'user',
-                                content: mediaBundle.imageParts.length
-                                    ? [{ type: 'text', text: promptText }].concat(mediaBundle.imageParts)
-                                    : promptText
-                            }
-                        ]
+                        messages: requestMessages
                     })
                 });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1538,7 +1556,7 @@
             }
 
             var spoken1 = {};
-            var parsed1 = await requestEvents(buildPrompt(allAuthorIds, false));
+            var parsed1 = await requestEvents(buildPrompt(allAuthorIds, false), allAuthorIds);
             await mutatePost(postId, function (p) {
                 spoken1 = applyEvents(p, parsed1);
                 if (!Array.isArray(p.summonRuns)) p.summonRuns = [];
@@ -1547,7 +1565,7 @@
 
             var missing = allAuthorIds.filter(function (id) { return !spoken1[id]; });
             if (missing.length) {
-                var parsed2 = await requestEvents(buildPrompt(missing, true));
+                var parsed2 = await requestEvents(buildPrompt(missing, true), missing);
                 await mutatePost(postId, function (p) { applyEvents(p, parsed2); });
             }
             toast('召唤完成');

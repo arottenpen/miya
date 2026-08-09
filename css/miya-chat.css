@@ -6331,3 +6331,11 @@ html.is-ios .qq-room__input {
 }
 .qq-room__row--card .qq-card-sayguess { margin: 2px 0; }
 
+.qq-request-preview__body { max-height: 60vh; overflow: auto; padding: 0 18px 18px; user-select: text; }
+.qq-request-preview__tabs { display: flex; gap: 8px; padding: 0 18px 12px; }
+.qq-request-preview__tabs button { border: 1px solid currentColor; background: transparent; padding: 6px 12px; border-radius: 999px; }
+.qq-request-preview__tabs button.is-active { background: var(--qq-accent, #6b5b4b); color: #fff; }
+.qq-request-preview__message { border-top: 1px solid rgba(80, 70, 60, .18); padding: 12px 0; }
+.qq-request-preview__meta { font-size: 12px; opacity: .65; margin-bottom: 6px; }
+.qq-request-preview__message pre, .qq-request-preview__json { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; }
+.qq-request-preview__empty { opacity: .65; padding: 28px 0; }

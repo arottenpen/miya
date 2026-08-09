@@ -2721,6 +2721,12 @@
         }
 
         var apiMessages = [{ role: 'system', content: systemContent }];
+        var prioritySystemPrompt = String(
+            contact.prioritySystemPrompt == null ? '' : contact.prioritySystemPrompt
+        );
+        if (prioritySystemPrompt.trim()) {
+            apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+        }
         var awInject = global.MiyaChatAwareness;
         var summaryBlock =
             awInject && typeof awInject.buildSummaryContextBlock === 'function'
@@ -3776,14 +3782,6 @@
         acquireChatApi(chatId);
 
         var cfg = getApiConfig();
-        var baseUrl = normalizeBaseUrl(cfg.baseUrl);
-        var apiKey = String(cfg.apiKey || '').trim();
-        var model = String(cfg.model || '').trim();
-        if (!baseUrl || !apiKey || !model) {
-            releaseChatApi(chatId);
-            return Promise.reject(new Error('api_not_configured'));
-        }
-
         var persistUser = options.skipUserMessage
             ? Promise.resolve()
             : store.addMessage(chatId, { role: 'user', content: text });
@@ -3852,35 +3850,47 @@
                 }
             })
             .then(function () {
-            var built = buildApiMessages(chatId, '', options);
-            if (built.error) return Promise.reject(new Error(built.error));
+                var built = buildApiMessages(chatId, '', options);
+                if (built.error) return Promise.reject(new Error(built.error));
 
-            function callWithSlice(slice, usedSecondary) {
-                if (!slice.baseUrl || !slice.apiKey || !slice.model) {
-                    return Promise.reject(new Error(usedSecondary ? 'secondary_api_not_configured' : 'api_not_configured'));
+                function callWithSlice(slice, usedSecondary) {
+                    var preview = {
+                        messages: built.messages,
+                        settings: { model: slice.model, temperature: slice.temperature },
+                        updatedAt: Date.now(),
+                        status: 'attempted'
+                    };
+                    var previewPatch = { lastRequestPreview: preview };
+                    var previewSave = store.updateChat ? store.updateChat(chatId, previewPatch) : Promise.resolve();
+                    if (!slice.baseUrl || !slice.apiKey || !slice.model) {
+                        return previewSave.then(function () {
+                            return Promise.reject(new Error(usedSecondary ? 'secondary_api_not_configured' : 'api_not_configured'));
+                        });
+                    }
+                    var url = slice.baseUrl + '/chat/completions';
+                    var reqHeaders = {
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer ' + slice.apiKey
+                    };
+                    var reqPayload = {
+                        model: slice.model,
+                        messages: built.messages,
+                        temperature: slice.temperature
+                    };
+                    return previewSave.then(function () {
+                        return fetchChatCompletion(url, reqHeaders, reqPayload, 1);
+                    }).then(function (completion) {
+                        if (!completion.replyRaw) throw new Error('empty_reply');
+                        completion._usedSecondaryApi = !!usedSecondary;
+                        return completion;
+                    });
                 }
-                var url = slice.baseUrl + '/chat/completions';
-                var reqHeaders = {
-                    'Content-Type': 'application/json',
-                    Authorization: 'Bearer ' + slice.apiKey
-                };
-                var reqPayload = {
-                    model: slice.model,
-                    messages: built.messages,
-                    temperature: slice.temperature
-                };
-                return fetchChatCompletion(url, reqHeaders, reqPayload, 1).then(function (completion) {
-                    if (!completion.replyRaw) throw new Error('empty_reply');
-                    completion._usedSecondaryApi = !!usedSecondary;
-                    return completion;
-                });
-            }
 
-            var primarySlice = resolveChatApiSlice(cfg, false);
-            return callWithSlice(primarySlice, false).catch(function (err) {
-                if (!cfg.fallbackToSecondary || !hasSecondaryApiConfigured(cfg)) throw err;
-                return callWithSlice(resolveChatApiSlice(cfg, true), true);
-            }).then(function (completion) {
+                var primarySlice = resolveChatApiSlice(cfg, false);
+                return callWithSlice(primarySlice, false).catch(function (err) {
+                    if (!cfg.fallbackToSecondary || !hasSecondaryApiConfigured(cfg)) throw err;
+                    return callWithSlice(resolveChatApiSlice(cfg, true), true);
+                }).then(function (completion) {
                 var data = completion.data;
                 var replyRawOriginal = String(completion.replyRaw || '');
                 var replyRaw = replyRawOriginal;

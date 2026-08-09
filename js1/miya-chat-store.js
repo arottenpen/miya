@@ -1556,6 +1556,35 @@
         };
     }
 
+    function cloneRequestPreviewValue(value, fallback) {
+        if (value === undefined) return fallback;
+        try {
+            var json = JSON.stringify(value);
+            return json === undefined ? fallback : JSON.parse(json);
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function normalizeRequestPreview(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        var messages = Array.isArray(raw.messages) ? raw.messages : [];
+        return {
+            messages: messages.slice(0, 500).map(function (m) {
+                return {
+                    role: cloneRequestPreviewValue(m && m.role, ''),
+                    content: cloneRequestPreviewValue(m && m.content, '')
+                };
+            }),
+            settings: {
+                model: String(raw.settings && raw.settings.model || '').slice(0, 200),
+                temperature: Number(raw.settings && raw.settings.temperature)
+            },
+            updatedAt: Number(raw.updatedAt) || 0,
+            status: String(raw.status || '').slice(0, 40)
+        };
+    }
+
     /** 自定义心声字段：禁止短截断（仅极端上限防撑爆） */
     var HEART_VOICE_FIELD_VALUE_MAX = 100000;
     var HEART_VOICE_FIELD_COUNT_MAX = 80;
@@ -1744,6 +1773,7 @@
             lastPromptMeta: normalizePromptMeta(raw && raw.lastPromptMeta),
             lastRawAssistantReply: String((raw && raw.lastRawAssistantReply) || '').slice(0, 600000),
             lastPromptDebug: normalizePromptDebug(raw && raw.lastPromptDebug),
+            lastRequestPreview: normalizeRequestPreview(raw && raw.lastRequestPreview),
             lastHeartVoiceParse: normalizeHeartVoiceParse(raw && raw.lastHeartVoiceParse),
             chatSettings: normalizeChatSettings(raw && raw.chatSettings),
             createdAt: Number(raw && raw.createdAt) || Date.now()

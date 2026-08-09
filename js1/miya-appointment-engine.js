@@ -851,6 +851,16 @@
             castContacts: castContacts
         });
         apiMessages.push({ role: 'system', content: systemContent });
+        castContacts.slice().reverse().forEach(function (castContact) {
+            var prioritySystemPrompt = String(
+                !castContact || castContact.prioritySystemPrompt == null
+                    ? ''
+                    : castContact.prioritySystemPrompt
+            );
+            if (prioritySystemPrompt.trim()) {
+                apiMessages.unshift({ role: 'system', content: prioritySystemPrompt });
+            }
+        });
 
         if (mem && typeof mem.injectAppointmentCrossMemory === 'function') {
             mem.injectAppointmentCrossMemory(apiMessages, cross);
