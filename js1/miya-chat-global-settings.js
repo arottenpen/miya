@@ -19,19 +19,67 @@
   var cache = null;
   var ready = null;
 
+  function cloneManagedValue(value) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? JSON.parse(JSON.stringify(value))
+      : value;
+  }
+
+  function mergeManagedValue(base, patch) {
+    if (patch == null) return cloneManagedValue(base);
+    if (patch && typeof patch === 'object' && !Array.isArray(patch)) {
+      return Object.assign({}, cloneManagedValue(base) || {}, cloneManagedValue(patch));
+    }
+    return patch;
+  }
+
+  function fallbackTimeAwareness() {
+    var tz = 'Asia/Shanghai';
+    try {
+      tz = (Intl && Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions().timeZone) || tz;
+    } catch (e) {}
+    return {
+      enabled: false,
+      mode: 'real',
+      real: { userTz: tz, roleTz: tz, strength: 'strong' }
+    };
+  }
+
+  function normalizeTimeAwareness(raw) {
+    var aw = global.MiyaChatAwareness;
+    if (aw && typeof aw.normalizeTimeAwareness === 'function') {
+      return aw.normalizeTimeAwareness(raw);
+    }
+    var d = fallbackTimeAwareness();
+    if (!raw || typeof raw !== 'object') return d;
+    return {
+      enabled: !!raw.enabled,
+      mode: String(raw.mode || 'real') === 'virtual' ? 'virtual' : 'real',
+      real: Object.assign({}, d.real, raw.real || {})
+    };
+  }
+
+  function normalizeManagedSlice(raw, defaults, fillMissing) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    defaults = defaults && typeof defaults === 'object' ? defaults : {};
+    var out = {};
+    MANAGED_KEYS.forEach(function (k) {
+      var hasRaw = raw[k] != null;
+      var value = hasRaw ? raw[k] : (fillMissing ? defaults[k] : null);
+      if (value == null) return;
+      out[k] = k === 'timeAwareness'
+        ? normalizeTimeAwareness(value)
+        : cloneManagedValue(value);
+    });
+    return out;
+  }
+
   function defaultGlobalSlice() {
     var d = global.miyaChatStore && global.miyaChatStore.defaultChatSettings
       ? global.miyaChatStore.defaultChatSettings()
       : {};
-    var out = {};
-    MANAGED_KEYS.forEach(function (k) {
-      if (d[k] != null) {
-        out[k] = typeof d[k] === 'object' && !Array.isArray(d[k])
-          ? JSON.parse(JSON.stringify(d[k]))
-          : d[k];
-      }
-    });
-    return out;
+    if (d.timeAwareness == null) d.timeAwareness = fallbackTimeAwareness();
+    return normalizeManagedSlice(d, {}, false);
   }
 
   function defaultState() {
@@ -49,13 +97,9 @@
     Object.keys(raw).forEach(function (cid) {
       var row = raw[cid];
       if (!row || typeof row !== 'object') return;
-      var settings = {};
-      MANAGED_KEYS.forEach(function (k) {
-        if (row.settings && row.settings[k] != null) settings[k] = row.settings[k];
-      });
       out[cid] = {
         useGlobal: row.useGlobal !== false ? !!row.useGlobal : false,
-        settings: settings
+        settings: normalizeManagedSlice(row.settings, {}, false)
       };
     });
     return out;
@@ -64,14 +108,10 @@
   function normalizeState(raw) {
     var d = defaultState();
     if (!raw || typeof raw !== 'object') return d;
-    var g = Object.assign({}, d.global, raw.global || {});
-    MANAGED_KEYS.forEach(function (k) {
-      if (g[k] == null && d.global[k] != null) g[k] = d.global[k];
-    });
     return {
       version: 1,
       useGlobal: raw.useGlobal !== false,
-      global: g,
+      global: normalizeManagedSlice(raw.global, d.global, true),
       perContact: normalizePerContact(raw.perContact)
     };
   }
@@ -116,7 +156,11 @@
 
   function saveGlobal(patch) {
     var st = readState();
-    var next = Object.assign({}, st.global, patch || {});
+    var nextRaw = Object.assign({}, st.global);
+    MANAGED_KEYS.forEach(function (k) {
+      if (patch && patch[k] != null) nextRaw[k] = mergeManagedValue(st.global[k], patch[k]);
+    });
+    var next = normalizeManagedSlice(nextRaw, st.global, true);
     return persist({ useGlobal: st.useGlobal, global: next, perContact: st.perContact });
   }
 
@@ -125,15 +169,16 @@
     if (!cid) return Promise.resolve(false);
     var st = readState();
     var prev = st.perContact[cid] || { useGlobal: false, settings: {} };
+    var nextSettings = Object.assign({}, prev.settings);
+    MANAGED_KEYS.forEach(function (k) {
+      if (patch && patch.settings && patch.settings[k] != null) {
+        nextSettings[k] = mergeManagedValue(prev.settings[k], patch.settings[k]);
+      }
+    });
     var row = {
       useGlobal: patch && patch.useGlobal != null ? !!patch.useGlobal : prev.useGlobal,
-      settings: Object.assign({}, prev.settings, (patch && patch.settings) || {})
+      settings: normalizeManagedSlice(nextSettings, {}, false)
     };
-    if (patch && patch.settings) {
-      Object.keys(patch.settings).forEach(function (k) {
-        if (MANAGED_KEYS.indexOf(k) >= 0) row.settings[k] = patch.settings[k];
-      });
-    }
     var perContact = Object.assign({}, st.perContact);
     perContact[cid] = row;
     return persist({ useGlobal: st.useGlobal, global: st.global, perContact: perContact });
@@ -181,14 +226,11 @@
     var st = readState();
     if (patch && patch.useGlobal != null) st.useGlobal = !!patch.useGlobal;
     if (patch && patch.global) {
-      st.global = Object.assign({}, st.global, patch.global);
-      if (patch.global.backgroundMessage) {
-        st.global.backgroundMessage = Object.assign(
-          {},
-          st.global.backgroundMessage || {},
-          patch.global.backgroundMessage
-        );
-      }
+      var nextGlobal = Object.assign({}, st.global);
+      MANAGED_KEYS.forEach(function (k) {
+        if (patch.global[k] != null) nextGlobal[k] = mergeManagedValue(st.global[k], patch.global[k]);
+      });
+      st.global = normalizeManagedSlice(nextGlobal, st.global, true);
     }
     if (patch && patch.perContact) st.perContact = patch.perContact;
     return persist(st);

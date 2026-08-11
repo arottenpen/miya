@@ -6,6 +6,34 @@
   var _cache = null;
   var _ready = null;
   var _wbCountMap = null;
+  var MODEL_IDENTITY_NAMES = [
+    'Gemini',
+    'Claude',
+    'ChatGPT',
+    'GPT',
+    'DeepSeek',
+    'Grok',
+    'Kimi',
+    'Qwen'
+  ];
+  var MODEL_IDENTITY_NAME_SET = Object.create(null);
+
+  function normalizeModelIdentityName(value) {
+    var name = String(value == null ? '' : value).trim();
+    if (name && typeof name.normalize === 'function') {
+      try { name = name.normalize('NFKC'); } catch (e) {}
+    }
+    return name.toLowerCase();
+  }
+
+  MODEL_IDENTITY_NAMES.forEach(function (name) {
+    MODEL_IDENTITY_NAME_SET[normalizeModelIdentityName(name)] = true;
+  });
+
+  function shouldSkipChronicleBlockForName(name) {
+    var normalized = normalizeModelIdentityName(name);
+    return !!(normalized && MODEL_IDENTITY_NAME_SET[normalized]);
+  }
 
   function invalidateWbCountMap() {
     _wbCountMap = null;
@@ -268,6 +296,7 @@
   function renderChronicleBlock(roleId) {
     var row = findCharacter(roleId);
     if (!row || !row.name) return '';
+    if (shouldSkipChronicleBlockForName(row.name)) return '';
     var lines = ['【角色·档案·' + String(row.name) + '】'];
     if (row.gender) lines.push('- 性别: ' + row.gender);
     if (row.age) lines.push('- 年龄: ' + row.age);
@@ -293,6 +322,8 @@
     countWorldbookBindingsMap: countWorldbookBindingsMap,
     invalidateWbCountMap: invalidateWbCountMap,
     resolveRolesForWorldbook: resolveRolesForWorldbook,
+    normalizeModelIdentityName: normalizeModelIdentityName,
+    shouldSkipChronicleBlockForName: shouldSkipChronicleBlockForName,
     renderChronicleBlock: renderChronicleBlock,
     invalidateCache: function () { _cache = null; _ready = null; invalidateWbCountMap(); }
   };

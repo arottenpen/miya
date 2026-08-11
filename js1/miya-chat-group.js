@@ -360,6 +360,12 @@
         if (!cs || !contact) return '';
         var row = cs.findCharacter(contact.chronicleId) || cs.findCharacter(contact.characterId);
         if (!row) return '';
+        if (
+            typeof cs.shouldSkipChronicleBlockForName === 'function' &&
+            cs.shouldSkipChronicleBlockForName(row.name)
+        ) {
+            return '';
+        }
         var lines = ['· ' + trim(row.name || contact.name)];
         if (row.gender) lines.push('  性别 ' + row.gender);
         if (row.age) lines.push('  年龄 ' + row.age);
@@ -708,12 +714,22 @@
         var lines = ['【本群成员人设】'];
         members.forEach(function (c) {
             var block = renderChronicleForContact(c);
+            var cs = global.miyaContactsStore;
+            var archiveRow = cs && typeof cs.findCharacter === 'function'
+                ? cs.findCharacter(c.chronicleId) || cs.findCharacter(c.characterId)
+                : null;
+            var skipChronicle = !!(
+                archiveRow &&
+                cs &&
+                typeof cs.shouldSkipChronicleBlockForName === 'function' &&
+                cs.shouldSkipChronicleBlockForName(archiveRow.name)
+            );
             var role = settings ? getMemberRole(settings, c.id) : 'member';
             var roleTxt = roleLabel(role);
             var roleTag = roleTxt ? '【本群' + roleTxt + '·输出此角色时须自知此身份】' : '';
             if (block) {
                 lines.push(roleTag ? roleTag + '\n' + block : block);
-            } else {
+            } else if (!skipChronicle) {
                 var dn = trim(c.name) || '成员';
                 lines.push('· ' + dn + (roleTxt ? '（本群' + roleTxt + '）' : ''));
             }

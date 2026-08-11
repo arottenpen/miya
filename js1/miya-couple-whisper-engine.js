@@ -113,6 +113,23 @@
     return trim(preset && preset.styleGuide);
   }
 
+  function resolveContactArchive(contact, contactsStore) {
+    if (!contact || !contactsStore || typeof contactsStore.findCharacter !== 'function') return null;
+    var ids = [];
+    var seen = {};
+    [contact.chronicleId, contact.characterId, contact.id].forEach(function (value) {
+      var id = trim(value);
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    });
+    for (var i = 0; i < ids.length; i++) {
+      var row = contactsStore.findCharacter(ids[i]);
+      if (row) return { id: ids[i], row: row };
+    }
+    return null;
+  }
+
   function formatLineForApi(line) {
     if (!line) return '';
     if (line.type === 'narration') return '【旁白】' + line.text;
@@ -171,13 +188,19 @@
     parts.push('这是情侣空间「深夜私语」的私密房间，线下深夜二人独处，乙女游戏式互动。');
 
     var cts = global.miyaContactsStore;
-    var roleId = trim((contact && contact.characterId) || (contact && contact.chronicleId));
-    if (roleId && cts && typeof cts.renderChronicleBlock === 'function') {
-      var chronicle = trim(cts.renderChronicleBlock(roleId));
+    var archive = resolveContactArchive(contact, cts);
+    var archiveRow = archive && archive.row;
+    var skipChronicle = !!(
+      cts &&
+      typeof cts.shouldSkipChronicleBlockForName === 'function' &&
+      cts.shouldSkipChronicleBlockForName(archiveRow ? archiveRow.name : contact.name)
+    );
+    if (!skipChronicle && archive && cts && typeof cts.renderChronicleBlock === 'function') {
+      var chronicle = trim(cts.renderChronicleBlock(archive.id));
       if (chronicle) parts.push(chronicle);
     }
 
-    if (contact.persona) {
+    if (!skipChronicle && !archive && contact.persona) {
       parts.push('【角色·' + charName + '·人设】\n' + trim(contact.persona));
     }
     if (profile) {

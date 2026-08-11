@@ -110,12 +110,18 @@
         if (!cs || !contact) return '';
         var ids = collectContactArchiveIds(contact);
         for (var i = 0; i < ids.length; i++) {
+            var row = cs.findCharacter ? cs.findCharacter(ids[i]) : null;
+            if (!row) continue;
+            if (
+                typeof cs.shouldSkipChronicleBlockForName === 'function' &&
+                cs.shouldSkipChronicleBlockForName(row.name)
+            ) {
+                return '';
+            }
             if (typeof cs.renderChronicleBlock === 'function') {
                 var fromStore = String(cs.renderChronicleBlock(ids[i]) || '').trim();
                 if (fromStore) return fromStore;
             }
-            var row = cs.findCharacter ? cs.findCharacter(ids[i]) : null;
-            if (!row) continue;
             var lines = ['【角色·档案·' + String(row.name || contact.name) + '】'];
             if (row.gender) lines.push('- 性别: ' + row.gender);
             if (row.age) lines.push('- 年龄: ' + row.age);

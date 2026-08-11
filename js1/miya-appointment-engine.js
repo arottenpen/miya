@@ -224,27 +224,57 @@
         return parts.filter(Boolean).join('\n');
     }
 
+    function resolveContactArchive(contact, contactsStore) {
+        if (!contact || !contactsStore || typeof contactsStore.findCharacter !== 'function') {
+            return null;
+        }
+        var ids = [];
+        var seen = {};
+        [contact.chronicleId, contact.characterId, contact.id].forEach(function (value) {
+            var id = String(value || '').trim();
+            if (!id || seen[id]) return;
+            seen[id] = true;
+            ids.push(id);
+        });
+        for (var i = 0; i < ids.length; i++) {
+            var row = contactsStore.findCharacter(ids[i]);
+            if (row) return { id: ids[i], row: row };
+        }
+        return null;
+    }
+
     function renderContactProfileBlock(contact) {
         var cs = global.miyaContactsStore;
         if (!cs || !contact) return '';
-        var rid = String(contact.characterId || contact.id || contact.chronicleId || '').trim();
-        if (rid && typeof cs.renderChronicleBlock === 'function') {
-            var fromStore = String(cs.renderChronicleBlock(rid) || '').trim();
-            if (fromStore) return fromStore;
-        }
-        if (rid && typeof cs.findCharacter === 'function') {
-            var row = cs.findCharacter(rid);
-            if (row && row.name) {
-                var lines = ['【角色·档案·' + String(row.name) + '】'];
-                if (row.gender) lines.push('- 性别: ' + row.gender);
-                if (row.age) lines.push('- 年龄: ' + row.age);
-                if (row.birthday) lines.push('- 生日: ' + row.birthday);
-                if (row.persona) lines.push('- 人设与背景: ' + row.persona);
-                if (lines.length > 1) return lines.join('\n');
+        var archive = resolveContactArchive(contact, cs);
+        if (archive && archive.row) {
+            var row = archive.row;
+            if (!row.name) return '';
+            if (
+                typeof cs.shouldSkipChronicleBlockForName === 'function' &&
+                cs.shouldSkipChronicleBlockForName(row.name)
+            ) {
+                return '';
             }
+            if (typeof cs.renderChronicleBlock === 'function') {
+                var fromStore = String(cs.renderChronicleBlock(archive.id) || '').trim();
+                if (fromStore) return fromStore;
+            }
+            var lines = ['【角色·档案·' + String(row.name) + '】'];
+            if (row.gender) lines.push('- 性别: ' + row.gender);
+            if (row.age) lines.push('- 年龄: ' + row.age);
+            if (row.birthday) lines.push('- 生日: ' + row.birthday);
+            if (row.persona) lines.push('- 人设与背景: ' + row.persona);
+            return lines.join('\n');
         }
         var name = String(contact.name || '').trim();
         if (!name) return '';
+        if (
+            typeof cs.shouldSkipChronicleBlockForName === 'function' &&
+            cs.shouldSkipChronicleBlockForName(name)
+        ) {
+            return '';
+        }
         return '【角色·档案·' + name + '】';
     }
 
