@@ -98,7 +98,7 @@
       var row = raw[cid];
       if (!row || typeof row !== 'object') return;
       out[cid] = {
-        useGlobal: row.useGlobal !== false ? !!row.useGlobal : false,
+        useGlobal: row.useGlobal !== false,
         settings: normalizeManagedSlice(row.settings, {}, false)
       };
     });

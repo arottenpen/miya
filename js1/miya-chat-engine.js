@@ -108,6 +108,12 @@
     function renderChronicleBlock(contact) {
         var cs = global.miyaContactsStore;
         if (!cs || !contact) return '';
+        if (
+            typeof cs.shouldSkipChronicleBlockForName === 'function' &&
+            cs.shouldSkipChronicleBlockForName(contact.name)
+        ) {
+            return '';
+        }
         var ids = collectContactArchiveIds(contact);
         for (var i = 0; i < ids.length; i++) {
             var row = cs.findCharacter ? cs.findCharacter(ids[i]) : null;
@@ -1086,20 +1092,6 @@
             typeof global.MiyaChatLifeLike.buildNextPushRulesBlock === 'function'
         ) {
             blocks.push(global.MiyaChatLifeLike.buildNextPushRulesBlock(contact, s));
-        }
-        var isProactiveTurn = !!(opts.isAutoPush || opts.isOffline || opts.isLifeLike);
-        /* 主动/离线轮已有 systemLead 时间块，避免再叠时间感知；衔接状态仍按注入历史判断（与普通回复同一套） */
-        if (
-            !isProactiveTurn &&
-            !opts.callMode &&
-            !opts.appointmentMode &&
-            global.MiyaChatAwareness &&
-            typeof global.MiyaChatAwareness.buildPerTurnTimeAwarenessBlock === 'function' &&
-            Array.isArray(opts.history) &&
-            opts.history.length
-        ) {
-            var timeTurn = global.MiyaChatAwareness.buildPerTurnTimeAwarenessBlock(s, opts.history);
-            if (timeTurn) blocks.push(timeTurn);
         }
         if (
             !opts.isRegenerate &&

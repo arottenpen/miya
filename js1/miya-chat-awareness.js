@@ -435,28 +435,6 @@
         return Math.round((nMid - tMid) / 86400000);
     }
 
-    /** 末尾连续用户消息区间（待回复）；用于纠正「刚发」误判 */
-    function trailingUserBurstMeta(history) {
-        if (!Array.isArray(history) || !history.length) {
-            return { count: 0, firstTs: 0, lastTs: 0 };
-        }
-        var lastTs = 0;
-        var firstTs = 0;
-        var count = 0;
-        var i;
-        for (i = history.length - 1; i >= 0; i--) {
-            var row = history[i];
-            if (!row || row.deleted) continue;
-            if (row.role !== 'user') break;
-            var t = Number(row.createdAt);
-            if (!Number.isFinite(t) || t <= 0) continue;
-            if (!lastTs) lastTs = t;
-            firstTs = t;
-            count += 1;
-        }
-        return { count: count, firstTs: firstTs, lastTs: lastTs };
-    }
-
     function shortTzTag(tz) {
         var s = String(tz || '').trim();
         if (!s) return '';
@@ -681,42 +659,13 @@
                 '- 你无法获知当前现实时间；除非用户明确给出时间，勿自行推断几点/刚刚等。'
             ].join('\n');
         }
-        var nowTs = Date.now();
-        var userLast = historyLastTs(history, 'user');
-        var asstLast = historyLastTs(history, 'assistant');
-        var lines = ['【时间运转】'];
-        lines.push('- 浏览器本地当前时间: ' + formatLocalMessageDateTime(nowTs));
-        if (userLast) {
-            lines.push('- 用户最新发言: ' + formatLocalMessageDateTime(userLast));
-        }
-        if (asstLast) {
-            lines.push('- 你方最新发言: ' + formatLocalMessageDateTime(asstLast));
-        }
-        if (ta.real.strength === 'strong') {
-            var trailing = trailingUserBurstMeta(history);
-            if (trailing.count > 0 && trailing.firstTs) {
-                lines.push(
-                        '- 末尾 ' +
-                        trailing.count +
-                        ' 条用户消息待回复；最早 ' +
-                        formatLocalMessageDateTime(trailing.firstTs) +
-                        '，按真实发送时刻理解，勿默认成刚刚。'
-                );
-            }
-        }
-        lines.push(
-            '- 每条真实聊天消息前缀形如 [2026/08/11-星期二-22:58:05]，即该条固定的浏览器本地发送时刻。'
-        );
-        lines.push('- 禁止在正文输出方括号时间前缀、⧗、› 或任何时间戳标记。');
-        lines.push('- 默认正文不要报时或重复强调经过了多久。');
-        return lines.join('\n');
-    }
-
-    function buildPerTurnTimeAwarenessBlock(chatSettings, history) {
-        var ta = normalizeTimeAwareness(chatSettings && chatSettings.timeAwareness);
-        if (!ta.enabled) return '';
-        var nowTs = Date.now();
-        return ['【本轮时间】', '- 浏览器本地当前时间: ' + formatLocalMessageDateTime(nowTs), '- 正文默认不必提时间。'].join('\n');
+        return [
+            '【时间运转】',
+            '- 每条真实聊天消息可能带有方括号时间戳，表示该消息固定的浏览器本地发送时刻。',
+            '- 当对话涉及时间、日期、先后顺序、间隔、时长或时效性时，应结合相关消息的时间戳理解和回答，不要默认消息发生在刚刚。',
+            '- 禁止在正文中输出方括号时间前缀、⧗、› 或其他时间戳标记。',
+            '- 对话与时间无关时，不要主动报时，也不要重复强调经过了多久。'
+        ].join('\n');
     }
 
     function buildPlaceAwarenessRules(chatSettings, contact, profile) {
@@ -1305,7 +1254,6 @@
         wallClockToMs: wallClockToMs,
         wallClockPartsInTz: wallClockPartsInTz,
         formatRoughDurationZh: formatRoughDurationZh,
-        formatPreciseDurationZh: formatPreciseDurationZh,
-        buildPerTurnTimeAwarenessBlock: buildPerTurnTimeAwarenessBlock
+        formatPreciseDurationZh: formatPreciseDurationZh
     };
 })(window);
