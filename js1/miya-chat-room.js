@@ -475,17 +475,9 @@
   }
 
   function formatMsgTime(ts) {
-    var d = new Date(Number(ts) || Date.now());
-    if (Number.isNaN(d.getTime())) return '';
-    var now = new Date();
-    var pad = function (n) { return n < 10 ? '0' + n : String(n); };
-    var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
-    if (d.getFullYear() === now.getFullYear() &&
-        d.getMonth() === now.getMonth() &&
-        d.getDate() === now.getDate()) {
-      return hm;
-    }
-    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm;
+    var aw = global.MiyaChatAwareness;
+    if (!aw || typeof aw.formatLocalMessageDateTime !== 'function') return '';
+    return aw.formatLocalMessageDateTime(ts);
   }
 
   function scheduleRefreshLists() {
@@ -1358,6 +1350,39 @@
     return 'assistant';
   }
 
+  function hasConversationGap(m) {
+    if (!m || !m.conversationGap || m.conversationGap.crossed !== true) return false;
+    var st = global.miyaChatStore;
+    if (st && typeof st.normalizeConversationGap === 'function') {
+      var gap = st.normalizeConversationGap(m.conversationGap);
+      return !!(gap && gap.crossed === true);
+    }
+    return Number.isFinite(Number(m.conversationGap.elapsedMs)) && Number(m.conversationGap.elapsedMs) > 30 * 60 * 1000;
+  }
+
+  function timeGapHtml(m) {
+    var aw = global.MiyaChatAwareness;
+    if (!hasConversationGap(m) || !aw || typeof aw.formatLocalMessageDateTime !== 'function') return '';
+    var formattedTime = aw.formatLocalMessageDateTime(m.createdAt);
+    if (!formattedTime) return '';
+    return '<div class="qq-room__time-gap" data-time-gap-for="' + esc(m.id) + '">' +
+      '<time>' + esc(formattedTime) + '</time>' +
+    '</div>';
+  }
+
+  function computeRoundPosForMessages(msgs, roles, index) {
+    var role = roles[index];
+    if (role === 'system') return 'solo';
+    var prev = index > 0 ? roles[index - 1] : null;
+    var next = index < roles.length - 1 ? roles[index + 1] : null;
+    var samePrev = prev === role && !hasConversationGap(msgs[index]);
+    var sameNext = next === role && !hasConversationGap(msgs[index + 1]);
+    if (!samePrev && !sameNext) return 'solo';
+    if (!samePrev && sameNext) return 'first';
+    if (samePrev && sameNext) return 'mid';
+    return 'last';
+  }
+
   var DEFAULT_MESSAGE_RENDER_LIMIT = 100;
 
   function resolveDisplayLimit(chatId) {
@@ -1473,7 +1498,13 @@
     var hint = sc.querySelector('.qq-room__mount-hint');
     var rows = sc.querySelectorAll('.qq-room__row:not(.qq-room__typing-row)');
     while (rows.length > limit) {
-      rows[0].remove();
+      var row = rows[0];
+      var msgId = row.getAttribute('data-msg-id') || '';
+      var gap = msgId
+        ? sc.querySelector('[data-time-gap-for="' + String(msgId).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]')
+        : null;
+      if (gap) gap.remove();
+      row.remove();
       rows = sc.querySelectorAll('.qq-room__row:not(.qq-room__typing-row)');
     }
     var pack = getVisibleMessages(chatId);
@@ -1683,10 +1714,10 @@
     return Promise.resolve(state.avatars[key]);
   }
 
-  function stripApiTimePrefix(text) {
+  function stripApiTimePrefix(text, message) {
     var aw = global.MiyaChatAwareness;
     if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-      return aw.stripTimelinePrefixForDisplay(text);
+      return aw.stripTimelinePrefixForDisplay(text, message);
     }
     return String(text || '').trim();
   }
@@ -1728,10 +1759,10 @@
   function messagePlainText(m) {
     if (!m || m.deleted || m.recalled) return '';
     if (m.type === 'html' || m.renderAsHtml) return '〔HTML 交互页〕';
-    if (m.role === 'system') return stripApiTimePrefix(m.content || '');
+    if (m.role === 'system') return stripApiTimePrefix(m.content || '', m);
     var fmt = global.MiyaChatOnlineFormat;
     if (fmt && typeof fmt.formatMessageBodyOnly === 'function') {
-      var body = stripApiTimePrefix(fmt.formatMessageBodyOnly(m));
+      var body = stripApiTimePrefix(fmt.formatMessageBodyOnly(m), m);
       if (body) return body;
     }
     if (m.type === 'voice') return m.voiceText || m.content || '';
@@ -1762,7 +1793,7 @@
       if (m.sayguessRecord.bankName) sgPrev += ' · ' + m.sayguessRecord.bankName;
       return '[你说我猜] ' + sgPrev;
     }
-    var raw = stripApiTimePrefix(m.voiceText || m.content);
+    var raw = stripApiTimePrefix(m.voiceText || m.content, m);
     if (m.role === 'assistant') raw = stripThinkingForDisplay(raw);
     return raw;
   }
@@ -2452,7 +2483,7 @@
 
   function renderVoiceCard(m, opts) {
     opts = opts || {};
-    var text = stripApiTimePrefix(m.voiceText || m.content || '').replace(/^语音[-－—]\s*/, '');
+    var text = stripApiTimePrefix(m.voiceText || m.content || '', m).replace(/^语音[-－—]\s*/, '');
     var userRecDur =
       typeof m.voiceDurationSec === 'number' &&
       Number.isFinite(m.voiceDurationSec) &&
@@ -2514,7 +2545,7 @@
       '</div>';
     }
     if (isChatImageGenerating(m, opts.chatId)) {
-      var capPending = payload.caption || stripApiTimePrefix(m.content || '').replace(/^图片[-－—]\s*/, '') || '文字图片';
+      var capPending = payload.caption || stripApiTimePrefix(m.content || '', m).replace(/^图片[-－—]\s*/, '') || '文字图片';
       return '<div class="qq-card qq-card-txtimg qq-card-txtimg--gen">' +
         '<div class="qq-card-txtimg__grain" aria-hidden="true"></div>' +
         '<header class="qq-card-txtimg__head">' +
@@ -2527,7 +2558,7 @@
       '</div>';
     }
     if (m.imageGenFailed) {
-      var capFailed = payload.caption || stripApiTimePrefix(m.content || '').replace(/^图片[-－—]\s*/, '') || '文字图片';
+      var capFailed = payload.caption || stripApiTimePrefix(m.content || '', m).replace(/^图片[-－—]\s*/, '') || '文字图片';
       return '<div class="qq-card qq-card-txtimg qq-card-txtimg--failed">' +
         '<div class="qq-card-txtimg__grain" aria-hidden="true"></div>' +
         '<header class="qq-card-txtimg__head">' +
@@ -2539,7 +2570,7 @@
         '</div>' +
       '</div>';
     }
-    var cap = payload.caption || stripApiTimePrefix(m.content || '').replace(/^图片[-－—]\s*/, '') || '文字图片';
+    var cap = payload.caption || stripApiTimePrefix(m.content || '', m).replace(/^图片[-－—]\s*/, '') || '文字图片';
     return '<div class="qq-card qq-card-txtimg">' +
       '<div class="qq-card-txtimg__grain" aria-hidden="true"></div>' +
       '<span class="qq-card-txtimg__corner qq-card-txtimg__corner--tl" aria-hidden="true"></span>' +
@@ -2761,7 +2792,7 @@
     var previewChatId = opts.chatId != null ? opts.chatId : state.chatId;
     var fmt = global.MiyaChatOnlineFormat;
     if (fmt && typeof fmt.isRoomInvisibleMessage === 'function' && fmt.isRoomInvisibleMessage(m)) return '';
-    if (m.role === 'system') return esc(stripApiTimePrefix(m.content)).replace(/\n/g, '<br>');
+    if (m.role === 'system') return esc(stripApiTimePrefix(m.content, m)).replace(/\n/g, '<br>');
     var payload = fmt && fmt.parseDisplayPayload
       ? fmt.parseDisplayPayload(m)
       : { kind: 'text', text: m.content, msg: m };
@@ -2806,7 +2837,7 @@
     else if (payload.kind === 'voice') body = renderVoiceCard(displayMsg, opts);
     else if (payload.kind === 'photo' || payload.kind === 'textImage') body = renderImageCard(displayMsg, payload, opts);
     else if (payload.kind === 'sticker') body = renderStickerCard(displayMsg, payload);
-    else body = esc(stripApiTimePrefix(payload.text != null ? payload.text : m.content)).replace(/\n/g, '<br>');
+    else body = esc(stripApiTimePrefix(payload.text != null ? payload.text : m.content, m)).replace(/\n/g, '<br>');
     var trMod = global.MiyaChatTranslate;
     if (!opts.preview && trMod && typeof trMod.buildTranslateHtml === 'function' && previewChatId && m.role === 'assistant') {
       body += trMod.buildTranslateHtml(previewChatId, m, esc);
@@ -3133,7 +3164,8 @@
     var html = '';
     var i;
     for (i = startIdx; i < endIdx; i++) {
-      html += bubbleHtml(msgs[i], ctx, computeRoundPos(roles, i), i, hvIndex);
+      html += timeGapHtml(msgs[i]);
+      html += bubbleHtml(msgs[i], ctx, computeRoundPosForMessages(msgs, roles, i), i, hvIndex);
     }
     return html;
   }
@@ -3229,10 +3261,7 @@
       return;
     }
     var hvIndex = resolveHeartVoiceHighlightIndex(chatId, ctx);
-    var html = mountHintHtml(pack);
-    html += msgs.map(function (m, i) {
-      return bubbleHtml(m, ctx, computeRoundPos(roles, i), i, hvIndex);
-    }).join('');
+    var html = mountHintHtml(pack) + buildMessagesHtml(msgs, ctx, roles, 0, msgs.length, hvIndex);
     var stickerIds = collectStickerBlobIdsFromMessages(msgs);
     paintMessagesShell(sc, html, chatId, Object.assign({ deferMedia: !!opts.isFirstOpen }, opts), anchor);
     if (stickerIds.length && store.prefetchBlobUrls) {
@@ -3261,7 +3290,7 @@
       if (m.role === 'system') return;
       var row = sc.querySelector('[data-msg-id="' + String(m.id).replace(/"/g, '\\"') + '"]');
       if (!row) return;
-      patchRowRoundClass(row, computeRoundPos(roles, i));
+      patchRowRoundClass(row, computeRoundPosForMessages(msgs, roles, i));
     });
   }
 
@@ -3291,11 +3320,15 @@
     });
     var hvIndex = resolveHeartVoiceHighlightIndex(state.chatId, ctx);
     var tmp = document.createElement('div');
-    tmp.innerHTML = bubbleHtml(m, ctx, computeRoundPos(roles, idx), idx, hvIndex);
-    var el = tmp.firstElementChild;
+    tmp.innerHTML = timeGapHtml(m) + bubbleHtml(m, ctx, computeRoundPosForMessages(msgs, roles, idx), idx, hvIndex);
+    var gapEl = tmp.querySelector('[data-time-gap-for]');
+    var el = tmp.querySelector('[data-msg-id]');
     if (el) {
       var existing = sc.querySelector('[data-msg-id="' + String(m.id).replace(/"/g, '\\"') + '"]');
+      var existingGap = sc.querySelector('[data-time-gap-for="' + String(m.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
       if (existing) {
+        if (existingGap) existingGap.remove();
+        if (gapEl) existing.parentNode.insertBefore(gapEl, existing);
         existing.replaceWith(el);
         hydrateBubbleMedia(el);
         if (stickBottom) scrollRoomToBottom(sc, true);
@@ -3304,13 +3337,18 @@
       }
       if (!opts.instant) el.classList.add('qq-room__row--enter');
       var typingRow = sc.querySelector('.qq-room__typing-row');
-      if (typingRow) sc.insertBefore(el, typingRow);
-      else sc.appendChild(el);
+      if (typingRow) {
+        if (gapEl) sc.insertBefore(gapEl, typingRow);
+        sc.insertBefore(el, typingRow);
+      } else {
+        if (gapEl) sc.appendChild(gapEl);
+        sc.appendChild(el);
+      }
       if (idx > 0 && m.role !== 'system') {
         var prevMsg = msgs[idx - 1];
         if (prevMsg && prevMsg.role === m.role) {
           var prevRow = sc.querySelector('[data-msg-id="' + String(prevMsg.id).replace(/"/g, '\\"') + '"]');
-          if (prevRow) patchRowRoundClass(prevRow, computeRoundPos(roles, idx - 1));
+          if (prevRow) patchRowRoundClass(prevRow, computeRoundPosForMessages(msgs, roles, idx - 1));
         }
       }
       hydrateBubbleMedia(el);
@@ -5677,10 +5715,14 @@
     });
     var hvIndex = resolveHeartVoiceHighlightIndex(state.chatId, ctx);
     var tmp = document.createElement('div');
-    tmp.innerHTML = bubbleHtml(m, ctx, computeRoundPos(roles, idx), undefined, hvIndex);
-    var next = tmp.firstElementChild;
+    tmp.innerHTML = timeGapHtml(m) + bubbleHtml(m, ctx, computeRoundPosForMessages(msgs, roles, idx), undefined, hvIndex);
+    var nextGap = tmp.querySelector('[data-time-gap-for]');
+    var next = tmp.querySelector('[data-msg-id]');
     if (!next) return;
     if (row.classList.contains('is-picked')) next.classList.add('is-picked');
+    var oldGap = sc.querySelector('[data-time-gap-for="' + sid.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
+    if (oldGap) oldGap.remove();
+    if (nextGap) row.parentNode.insertBefore(nextGap, row);
     row.replaceWith(next);
     hydrateBubbleMedia(sc);
   }

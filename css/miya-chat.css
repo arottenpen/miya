@@ -558,6 +558,22 @@
 .qq-room__row--me .qq-room__msg-time { text-align: right; }
 .qq-room__msg-time--sys { text-align: center; margin-top: 6px; }
 
+.qq-room__time-gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 18px 0 14px;
+  padding: 0 12px;
+  color: var(--mc-ink-faint);
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.qq-room__time-gap time { font: inherit; color: inherit; }
+
 /* 聊天时间戳 · 独立字号（不受聊天全局字号叠加） */
 #qq-room[data-miya-ts-fs] time.qq-room__msg-time,
 #mq-bf-preview-room[data-miya-ts-fs] time.qq-room__msg-time,
@@ -565,6 +581,14 @@
 #qq-room.mq-has-custom-css[data-miya-ts-fs] time.qq-room__msg-time,
 #mq-bf-preview-room.mq-has-custom-css[data-miya-ts-fs] time.qq-room__msg-time,
 [data-mq-bf-css-preview].mq-has-custom-css[data-miya-ts-fs] time.qq-room__msg-time {
+  font-size: calc(10px * var(--miya-chat-ts-font-size-scale, 1)) !important;
+}
+#qq-room[data-miya-ts-fs] .qq-room__time-gap,
+#mq-bf-preview-room[data-miya-ts-fs] .qq-room__time-gap,
+[data-mq-bf-css-preview][data-miya-ts-fs] .qq-room__time-gap,
+#qq-room.mq-has-custom-css[data-miya-ts-fs] .qq-room__time-gap,
+#mq-bf-preview-room.mq-has-custom-css[data-miya-ts-fs] .qq-room__time-gap,
+[data-mq-bf-css-preview].mq-has-custom-css[data-miya-ts-fs] .qq-room__time-gap {
   font-size: calc(10px * var(--miya-chat-ts-font-size-scale, 1)) !important;
 }
 

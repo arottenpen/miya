@@ -930,9 +930,6 @@
                     ? fmt.formatMessageForApi(m)
                     : String(m.content || '').trim();
             t = stripThinkingForApi(t);
-            if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-                t = aw.stripTimelinePrefixForDisplay(t);
-            }
             t = String(t || '').trim();
             if (!t) continue;
             if (t.length > 140) t = t.slice(0, 137) + '…';
@@ -2613,15 +2610,13 @@
     /**
      * 连续用户消息合并为一条；连续角色气泡/可注入旁白合并为一条 assistant（防网关折叠中间 assistant）。
      * 严格按时间线顺序写出；user / assistant / system 身份不混淆。
-     * 开启时间感知时每条带发送时刻前缀。
+     * 每条真实聊天消息均使用自身固定发送时刻前缀。
      */
     function appendHistoryToApiMessages(apiMessages, history, chatSettings) {
         var buf = [];
         var bufStamped = [];
         var asstBuf = [];
         var aw = global.MiyaChatAwareness;
-        var nowTs = Date.now();
-        var lastStampedTs = 0;
         var fmtHist = getOnlineFormatApi();
         function flushUser() {
             if (!buf.length) return;
@@ -2647,10 +2642,9 @@
             flushUser();
             var stamped = body;
             if (aw && typeof aw.stampMessageForApi === 'function') {
-                stamped = aw.stampMessageForApi(body, m || { role: 'assistant' }, chatSettings, nowTs, lastStampedTs);
+                stamped = aw.stampMessageForApi(body, m || { role: 'assistant' }, chatSettings);
             }
             asstBuf.push(stamped);
-            lastStampedTs = pickMessageTs(m, lastStampedTs);
         }
         function pushSystemBlock(block) {
             if (!block) return;
@@ -2688,21 +2682,11 @@
                     narrBody = String(narrBody || '').trim();
                     if (!narrBody) return;
                     if (isUserNarr) {
-                        /* 用户旁白：固定以 system 注入，始终进上下文 */
-                        var narrStamp =
-                            aw && typeof aw.stampMessageForApi === 'function'
-                                ? aw.stampMessageForApi(
-                                      narrBody,
-                                      Object.assign({}, m, { role: 'user' }),
-                                      chatSettings,
-                                      nowTs,
-                                      lastStampedTs
-                                  )
-                                : narrBody;
-                        pushSystemBlock(narrStamp);
-                        lastStampedTs = pickMessageTs(m, lastStampedTs);
+                        /* 用户旁白仍是 system 行，不使用真实聊天消息时间前缀 */
+                        pushSystemBlock(narrBody);
                     } else {
-                        pushAssistantLine(narrBody, m);
+                        flushUser();
+                        asstBuf.push(narrBody);
                     }
                     return;
                 }
@@ -2737,11 +2721,10 @@
                 ut = applyOfflineMeetLabel(ut, m);
                 var stamped =
                     aw && typeof aw.stampMessageForApi === 'function'
-                        ? aw.stampMessageForApi(ut, m, chatSettings, nowTs, lastStampedTs)
+                        ? aw.stampMessageForApi(ut, m, chatSettings)
                         : ut;
                 buf.push(ut);
                 bufStamped.push(stamped);
-                lastStampedTs = pickMessageTs(m, lastStampedTs);
                 return;
             }
             if (m.role === 'assistant') {
@@ -2759,12 +2742,55 @@
         flushAssistant();
     }
 
-    function pickMessageTs(m, fallback) {
-        var t = Number(m && m.createdAt);
-        return Number.isFinite(t) && t > 0 ? t : fallback || 0;
+    var pendingOnlineReturnPromptByChat = Object.create(null);
+    var consumedConversationGapReminderKeys = new Set();
+
+    function isOrdinaryUserReplyRequest(opts) {
+        opts = opts && typeof opts === 'object' ? opts : {};
+        return !(
+            opts.isRegenerate ||
+            opts.isAutoPush ||
+            opts.isOffline ||
+            opts.isLifeLike ||
+            opts.isMomentsAuto ||
+            opts.callMode ||
+            opts.appointmentMode
+        );
     }
 
-    var pendingOnlineReturnPromptByChat = Object.create(null);
+    function prepareConversationGapReminder(chatId, opts, directUserMessage) {
+        if (!isOrdinaryUserReplyRequest(opts)) return null;
+        var st = global.miyaChatStore;
+        var aw = global.MiyaChatAwareness;
+        if (
+            !st ||
+            !aw ||
+            typeof aw.buildConversationGapReminder !== 'function'
+        ) {
+            return null;
+        }
+        var target = directUserMessage && directUserMessage.role === 'user' ? directUserMessage : null;
+        if (!target && opts && opts.skipUserMessage) {
+            var userRound = getTrailingUserRound(loadApiHistory(st, chatId));
+            for (var i = 0; i < userRound.length; i++) {
+                var row = userRound[i];
+                var isReal =
+                    typeof st.isRealTimelineMessage === 'function'
+                        ? st.isRealTimelineMessage(row)
+                        : typeof aw.isRealChatMessage === 'function' && aw.isRealChatMessage(row);
+                if (isReal && row.role === 'user') {
+                    target = row;
+                    break;
+                }
+            }
+        }
+        if (!target || target.role !== 'user' || !target.id) return null;
+        var text = aw.buildConversationGapReminder(target);
+        if (!text) return null;
+        var key = String(chatId || '') + '::' + String(target.id);
+        if (consumedConversationGapReminderKeys.has(key)) return null;
+        return { key: key, text: text, userMessageId: String(target.id) };
+    }
 
     function filterOfflineMirrorsFromApiHistory(history, apiChatId, contactId) {
         var apMem = global.MiyaAppointmentMemory;
@@ -3098,6 +3124,9 @@
         appendHistoryToApiMessages(apiMessages, sliceAppend, settings);
         if (!opts.callMode && !opts.appointmentMode) {
             attachTrailingRoundPhotosToApiMessages(apiMessages, sliceAppend);
+        }
+        if (opts.conversationGapReminder) {
+            apiMessages.push({ role: 'system', content: String(opts.conversationGapReminder) });
         }
         var historyTailState = getTrailingSpeakerState(sliceAppend);
         /*
@@ -3547,8 +3576,9 @@
         return !!(normalizeBaseUrl(sec.baseUrl) && String(sec.apiKey || '').trim() && String(sec.model || '').trim());
     }
 
-    function fetchChatCompletion(url, headers, payload, attempt) {
+    function fetchChatCompletion(url, headers, payload, attempt, omitGapReminderOnRetry, priorHttpOk) {
         var tryNo = Math.max(1, Number(attempt) || 1);
+        var httpOkReceived = !!priorHttpOk;
         return fetch(url, {
             method: 'POST',
             headers: headers,
@@ -3560,15 +3590,44 @@
                         throw new Error('HTTP ' + r.status + (t ? ': ' + t.slice(0, 200) : ''));
                     });
                 }
-                return r.json();
+                httpOkReceived = true;
+                return r.json().catch(function (err) {
+                    if (err && typeof err === 'object') err.chatCompletionHttpOk = true;
+                    throw err;
+                });
             })
             .then(function (data) {
                 var replyRaw = extractReplyContent(data);
                 if (!replyRaw && tryNo < CHAT_COMPLETION_MAX_ATTEMPTS) {
-                    return fetchChatCompletion(url, headers, payload, tryNo + 1);
+                    return fetchChatCompletion(
+                        url,
+                        headers,
+                        omitGapReminderOnRetry
+                            ? Object.assign({}, payload, {
+                                  messages: stripConversationGapReminderMessages(payload && payload.messages)
+                              })
+                            : payload,
+                        tryNo + 1,
+                        omitGapReminderOnRetry,
+                        httpOkReceived
+                    );
                 }
-                return { data: data, replyRaw: replyRaw };
+                return { data: data, replyRaw: replyRaw, httpOkReceived: httpOkReceived };
+            })
+            .catch(function (err) {
+                if (httpOkReceived && err && typeof err === 'object') err.chatCompletionHttpOk = true;
+                throw err;
             });
+    }
+
+    function stripConversationGapReminderMessages(messages) {
+        return (Array.isArray(messages) ? messages : []).filter(function (message) {
+            return !(
+                message &&
+                message.role === 'system' &&
+                /^【对话间隔提醒】距离上次对话经过了 /.test(String(message.content || ''))
+            );
+        });
     }
 
     function extractBodyForBubbles(rawText) {
@@ -3622,23 +3681,19 @@
             });
             lines = expanded.filter(Boolean);
         }
-        if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-            lines = lines.map(function (line) {
-                return aw.stripTimelinePrefixForDisplay(line);
-            }).filter(Boolean);
-        }
         var fmtSplit = getOnlineFormatApi();
-        if (fmtSplit && typeof fmtSplit.splitCollapsedOnlineTypeLines === 'function') {
-            var expanded = [];
-            lines.forEach(function (line) {
-                var parts = fmtSplit.splitCollapsedOnlineTypeLines(line);
-                if (parts.length > 1) parts.forEach(function (p) { if (p) expanded.push(p); });
-                else expanded.push(parts[0] || line);
-            });
-            lines = expanded.filter(Boolean);
-        }
         if (fmtSplit && typeof fmtSplit.sanitizeRoleOutputLines === 'function') {
-            lines = fmtSplit.sanitizeRoleOutputLines(lines);
+            var sanitized = [];
+            lines.forEach(function (line) {
+                if (/^(?:[^｜|:：]+[｜|:：]\s*)?\[\d{4}\//.test(String(line || '').trim())) {
+                    sanitized.push(line);
+                    return;
+                }
+                fmtSplit.sanitizeRoleOutputLines([line]).forEach(function (part) {
+                    if (part) sanitized.push(part);
+                });
+            });
+            lines = sanitized;
         }
         if (fmtSplit && typeof fmtSplit.filterStructuralLeakLines === 'function') {
             lines = fmtSplit.filterStructuralLeakLines(lines);
@@ -4073,8 +4128,10 @@
 
         var cfg = getApiConfig();
         var persistUser = options.skipUserMessage
-            ? Promise.resolve()
+            ? Promise.resolve(null)
             : store.addMessage(chatId, { role: 'user', content: text });
+        var persistedUserMessage = null;
+        var pendingGapReminder = null;
 
         function clearInFlight() {
             releaseChatApi(chatId);
@@ -4113,7 +4170,8 @@
         }
 
         return persistUser
-            .then(function () {
+            .then(function (savedUserMessage) {
+                persistedUserMessage = savedUserMessage || null;
                 var peek = global.miyaDiaryPeek;
                 if (
                     peek &&
@@ -4140,22 +4198,16 @@
                 }
             })
             .then(function () {
-                var built = buildApiMessages(chatId, '', options);
+                pendingGapReminder = prepareConversationGapReminder(chatId, options, persistedUserMessage);
+                var buildOptions = pendingGapReminder
+                    ? Object.assign({}, options, { conversationGapReminder: pendingGapReminder.text })
+                    : options;
+                var built = buildApiMessages(chatId, '', buildOptions);
                 if (built.error) return Promise.reject(new Error(built.error));
 
                 function callWithSlice(slice, usedSecondary) {
-                    var preview = {
-                        messages: built.messages,
-                        settings: { model: slice.model, temperature: slice.temperature },
-                        updatedAt: Date.now(),
-                        status: 'attempted'
-                    };
-                    var previewPatch = { lastRequestPreview: preview };
-                    var previewSave = store.updateChat ? store.updateChat(chatId, previewPatch) : Promise.resolve();
                     if (!slice.baseUrl || !slice.apiKey || !slice.model) {
-                        return previewSave.then(function () {
-                            return Promise.reject(new Error(usedSecondary ? 'secondary_api_not_configured' : 'api_not_configured'));
-                        });
+                        return Promise.reject(new Error(usedSecondary ? 'secondary_api_not_configured' : 'api_not_configured'));
                     }
                     var url = slice.baseUrl + '/chat/completions';
                     var reqHeaders = {
@@ -4164,15 +4216,43 @@
                     };
                     var reqPayload = {
                         model: slice.model,
-                        messages: built.messages,
+                        messages: pendingGapReminder
+                            ? built.messages
+                            : stripConversationGapReminderMessages(built.messages),
                         temperature: slice.temperature
                     };
+                    var preview = {
+                        messages: reqPayload.messages,
+                        settings: { model: slice.model, temperature: slice.temperature },
+                        updatedAt: Date.now(),
+                        status: 'attempted'
+                    };
+                    var previewPatch = { lastRequestPreview: preview };
+                    var previewSave = store.updateChat ? store.updateChat(chatId, previewPatch) : Promise.resolve();
+                    var sentGapReminder = !!pendingGapReminder;
                     return previewSave.then(function () {
-                        return fetchChatCompletion(url, reqHeaders, reqPayload, 1);
+                        return fetchChatCompletion(
+                            url,
+                            reqHeaders,
+                            reqPayload,
+                            1,
+                            sentGapReminder,
+                            false
+                        );
                     }).then(function (completion) {
+                        if (sentGapReminder && completion && completion.httpOkReceived && pendingGapReminder) {
+                            consumedConversationGapReminderKeys.add(pendingGapReminder.key);
+                            pendingGapReminder = null;
+                        }
                         if (!completion.replyRaw) throw new Error('empty_reply');
                         completion._usedSecondaryApi = !!usedSecondary;
                         return completion;
+                    }).catch(function (err) {
+                        if (sentGapReminder && err && err.chatCompletionHttpOk && pendingGapReminder) {
+                            consumedConversationGapReminderKeys.add(pendingGapReminder.key);
+                            pendingGapReminder = null;
+                        }
+                        throw err;
                     });
                 }
 
@@ -4374,12 +4454,32 @@
                             displayLines = avExtract.lines;
                             pendingAvatarSwaps = Array.isArray(avExtract.swaps) ? avExtract.swaps : [];
                         }
+                        var replyBaseTs = Date.now();
+                        var replySeq = 0;
+                        function nextReplyCreatedAt() {
+                            var ts = replyBaseTs + replySeq;
+                            replySeq += 1;
+                            return ts;
+                        }
+                        function buildFallbackAssistantBubble(line) {
+                            var createdAt = nextReplyCreatedAt();
+                            var content = String(line || '').trim();
+                            var aw = global.MiyaChatAwareness;
+                            if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
+                                content = aw.stripTimelinePrefixForDisplay(content, {
+                                    role: 'assistant',
+                                    createdAt: createdAt
+                                });
+                            }
+                            return { role: 'assistant', type: 'text', content: content, createdAt: createdAt };
+                        }
                         var parsedBubbles;
                         if (options.callMode && global.MiyaChatCalls && typeof global.MiyaChatCalls.parseCallApiLines === 'function') {
                             callApiMeta = global.MiyaChatCalls.parseCallApiLines(displayLines, {
                                 mode: options.callParseMode || 'turn',
                                 callId: options.callId,
-                                callKind: options.callKind
+                                callKind: options.callKind,
+                                nextCreatedAt: nextReplyCreatedAt
                             });
                             parsedBubbles = callApiMeta.bubbles || [];
                         } else if (
@@ -4399,11 +4499,14 @@
                                 store,
                                 chatId,
                                 gCatalog,
-                                built.profile
+                                built.profile,
+                                { nextCreatedAt: nextReplyCreatedAt }
                             );
                             pendingRoleCall = null;
                         } else if (fmt && typeof fmt.parseRoleOutputLinesMeta === 'function') {
-                            var metaParsed = fmt.parseRoleOutputLinesMeta(displayLines, catalog);
+                            var metaParsed = fmt.parseRoleOutputLinesMeta(displayLines, catalog, {
+                                nextCreatedAt: nextReplyCreatedAt
+                            });
                             parsedBubbles = metaParsed.bubbles;
                             pendingRoleCall = metaParsed.pendingRoleCall;
                             if (userWantsHtml && htmlOnly && htmlOnly.raw) {
@@ -4421,27 +4524,21 @@
                         } else if (fmt && typeof fmt.parseRoleOutputLines === 'function') {
                             parsedBubbles = fmt.parseRoleOutputLines(displayLines, catalog);
                         } else {
-                            parsedBubbles = bubbles.map(function (b) {
-                                return { role: 'assistant', type: 'text', content: b };
-                            });
+                            parsedBubbles = bubbles.map(buildFallbackAssistantBubble);
                         }
 
                         if (!parsedBubbles.length && displayLines.length && !options.callMode) {
-                            parsedBubbles = displayLines.map(function (b) {
-                                return { role: 'assistant', type: 'text', content: b };
-                            });
+                            parsedBubbles = displayLines.map(buildFallbackAssistantBubble);
                             pendingRoleCall = null;
                         }
                         if (!parsedBubbles.length && !options.callMode && bubbles.length) {
-                            parsedBubbles = bubbles.map(function (b) {
-                                return { role: 'assistant', type: 'text', content: b };
-                            });
+                            parsedBubbles = bubbles.map(buildFallbackAssistantBubble);
                             pendingRoleCall = null;
                         }
                         if (!parsedBubbles.length && !options.callMode) {
                             var salvageRaw = buildSalvageBubbleText(replyRaw);
                             if (salvageRaw) {
-                                parsedBubbles = [{ role: 'assistant', type: 'text', content: salvageRaw }];
+                                parsedBubbles = [buildFallbackAssistantBubble(salvageRaw)];
                                 pendingRoleCall = null;
                             }
                         }
@@ -4465,7 +4562,7 @@
                                 typeof global.MiyaChatCalls.isCallDialCommandLine === 'function' &&
                                 global.MiyaChatCalls.isCallDialCommandLine(lastResort);
                             if (lastResort && !skipCallSalvage) {
-                                parsedBubbles = [{ role: 'assistant', type: 'text', content: lastResort }];
+                                parsedBubbles = [buildFallbackAssistantBubble(lastResort)];
                             } else if (!options.callMode) {
                                 throw new Error('empty_reply');
                             }
@@ -4502,13 +4599,6 @@
                             !options.callMode && chatRow && chatRow.type !== 'group'
                                 ? 'rb-' + Date.now() + '-' + String(Math.floor(Math.random() * 1e9))
                                 : '';
-                        var replyBaseTs = Date.now();
-                        var replySeq = 0;
-                        function nextReplyCreatedAt() {
-                            var ts = replyBaseTs + replySeq;
-                            replySeq += 1;
-                            return ts;
-                        }
                         function appendNarrationAfterBubble(acc, bubbleIndex) {
                             if (!narrationOps.length || !replyBatchId) return Promise.resolve(acc);
                             var chainN = Promise.resolve(acc);
@@ -4550,7 +4640,9 @@
                                     Object.assign({ role: 'assistant' }, fields || {})
                                 );
                                 if (replyBatchId) payload.replyBatchId = replyBatchId;
-                                payload.createdAt = nextReplyCreatedAt();
+                                if (!Number.isFinite(Number(payload.createdAt)) || Number(payload.createdAt) <= 0) {
+                                    payload.createdAt = nextReplyCreatedAt();
+                                }
                                 if (options.callId) payload.callId = String(options.callId);
                                 if (options.callKind) payload.callKind = options.callKind === 'video' ? 'video' : 'voice';
                                 if (
@@ -4581,21 +4673,6 @@
                                 }
                                 if (awSanitize && typeof awSanitize.sanitizeRoleMessageFields === 'function') {
                                     payload = awSanitize.sanitizeRoleMessageFields(payload);
-                                } else if (
-                                    awSanitize &&
-                                    typeof awSanitize.stripTimelinePrefixForDisplay === 'function'
-                                ) {
-                                    if (payload.content) {
-                                        payload.content = awSanitize.stripTimelinePrefixForDisplay(payload.content);
-                                    }
-                                    if (payload.voiceText) {
-                                        payload.voiceText = awSanitize.stripTimelinePrefixForDisplay(
-                                            payload.voiceText
-                                        );
-                                    }
-                                    if (payload.callLine) {
-                                        payload.callLine = awSanitize.stripTimelinePrefixForDisplay(payload.callLine);
-                                    }
                                 }
                                 if (options.callEphemeral) {
                                     var lineText = String(

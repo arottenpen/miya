@@ -1798,18 +1798,98 @@
             .trim();
     }
 
-    function stripApiTimelinePrefix(text) {
-        var aw = global.MiyaChatAwareness;
-        if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-            return aw.stripTimelinePrefixForDisplay(text);
+    function validMessageCreatedAt(value) {
+        var ts = Number(value);
+        return Number.isFinite(ts) && ts > 0 ? ts : 0;
+    }
+
+    var RE_LEGACY_ASSISTANT_TIMELINE_PREFIX =
+        /^⧗(?:用户|角色|[ua])·(?:\d+m·)?(?:昨·|\d+天·|\d{1,2}-\d{1,2}·|\d{1,2}\/\d{1,2}·)?(?:周[一二三四五六日天]·)?\d{1,2}:\d{2}(?:@[^›·]+)?›\s*/;
+
+    function formatLocalMessageDateTime(ts) {
+        var t = validMessageCreatedAt(ts);
+        if (!t) return '';
+        var d = new Date(t);
+        if (Number.isNaN(d.getTime())) return '';
+        function pad2(n) {
+            return String(n).padStart(2, '0');
         }
-        return String(text || '').trim();
+        return (
+            d.getFullYear() +
+            '/' +
+            pad2(d.getMonth() + 1) +
+            '/' +
+            pad2(d.getDate()) +
+            '-星期' +
+            '日一二三四五六'.charAt(d.getDay()) +
+            '-' +
+            pad2(d.getHours()) +
+            ':' +
+            pad2(d.getMinutes()) +
+            ':' +
+            pad2(d.getSeconds())
+        );
+    }
+
+    function stripAssistantTimelinePrefix(text, createdAt) {
+        var out = String(text || '').trim();
+        var expected = formatLocalMessageDateTime(createdAt);
+        var guard = 0;
+        while (out && guard++ < 8) {
+            var next = out.replace(RE_LEGACY_ASSISTANT_TIMELINE_PREFIX, '').trim();
+            if (expected && next === out) {
+                var prefix = '[' + expected + ']';
+                if (out.slice(0, prefix.length) === prefix) next = out.slice(prefix.length).trim();
+            }
+            if (next === out) break;
+            out = next;
+        }
+        return out;
+    }
+
+    function normalizeMessageText(text, role, createdAt) {
+        var out = String(text || '').trim();
+        return role === 'assistant' ? stripAssistantTimelinePrefix(out, createdAt) : out;
+    }
+
+    function normalizeConversationGap(raw) {
+        if (!raw || typeof raw !== 'object') return undefined;
+        if (raw.crossed === false) return { crossed: false };
+        if (raw.crossed !== true) return undefined;
+        var elapsedMs = Number(raw.elapsedMs);
+        if (!Number.isFinite(elapsedMs)) return undefined;
+        elapsedMs = Math.max(0, Math.floor(elapsedMs));
+        if (elapsedMs <= 30 * 60 * 1000) return undefined;
+        var out = {
+            crossed: true,
+            elapsedMs: elapsedMs
+        };
+        var previousMessageId = String(raw.previousMessageId || '').trim();
+        if (previousMessageId) out.previousMessageId = previousMessageId;
+        return out;
+    }
+
+    function sortMessagesByKnownTime(list) {
+        return (Array.isArray(list) ? list : [])
+            .map(function (message, index) {
+                return { message: message, index: index, createdAt: validMessageCreatedAt(message && message.createdAt) };
+            })
+            .sort(function (a, b) {
+                if (a.createdAt && b.createdAt) return a.createdAt - b.createdAt || a.index - b.index;
+                if (a.createdAt) return -1;
+                if (b.createdAt) return 1;
+                return a.index - b.index;
+            })
+            .map(function (row) {
+                return row.message;
+            });
     }
 
     function normalizeMessage(raw) {
         var role =
             raw && raw.role === 'assistant' ? 'assistant' : raw && raw.role === 'system' ? 'system' : 'user';
-        var content = stripApiTimelinePrefix(String((raw && raw.content) || ''));
+        var createdAt = validMessageCreatedAt(raw && raw.createdAt);
+        var content = normalizeMessageText((raw && raw.content) || '', role, createdAt);
         if (role === 'assistant') content = stripThinkingTags(content);
         var type = String((raw && raw.type) || 'text').trim() || 'text';
         var loc = raw && raw.locationCard && typeof raw.locationCard === 'object' ? raw.locationCard : null;
@@ -1822,7 +1902,7 @@
             role: role,
             type: type,
             content: content,
-            createdAt: Number(raw && raw.createdAt) || Date.now(),
+            createdAt: createdAt,
             deleted: !!(raw && raw.deleted),
             edited: !!(raw && raw.edited),
             editedAt: Number(raw && raw.editedAt) || 0,
@@ -1830,7 +1910,7 @@
             quoteRef: normalizeQuoteRef(raw && raw.quoteRef),
             imageDataKey: String((raw && raw.imageDataKey) || '').trim(),
             imageKind: String((raw && raw.imageKind) || '').trim(),
-            imageVisionText: stripApiTimelinePrefix(String((raw && raw.imageVisionText) || '')),
+            imageVisionText: normalizeMessageText((raw && raw.imageVisionText) || '', role, createdAt),
             stickerBlobId: String((raw && raw.stickerBlobId) || '').trim(),
             stickerUrl: String((raw && raw.stickerUrl) || '').trim(),
             stickerName: String((raw && raw.stickerName) || '').trim(),
@@ -1883,7 +1963,7 @@
                   }
                 : null,
             giftParcel: normalizeGiftParcel(gp),
-            voiceText: stripApiTimelinePrefix(String((raw && raw.voiceText) || ''))
+            voiceText: normalizeMessageText((raw && raw.voiceText) || '', role, createdAt)
         };
         if (grp) {
             var grpRp = global.MiyaChatGroupRedPacket;
@@ -2244,6 +2324,12 @@
         }
         if (raw && raw.imageGenPending) out.imageGenPending = true;
         if (raw && raw.imageGenFailed) out.imageGenFailed = true;
+        var canKeepConversationGap =
+            (out.role === 'user' || out.role === 'assistant') && !out.offlineMeet && !isMomentsMemoryRow(out);
+        var conversationGap = canKeepConversationGap
+            ? normalizeConversationGap(raw && raw.conversationGap)
+            : undefined;
+        if (conversationGap) out.conversationGap = conversationGap;
         return out;
     }
 
@@ -2297,7 +2383,7 @@
         if (m.role === 'system') return String(m.content || '').trim();
         if (m.type === 'image') {
             if (m.imageKind === 'text') {
-                var tcap = stripApiTimelinePrefix(String(m.content || '')).replace(/^图片[-－—]\s*/, '');
+                var tcap = String(m.content || '').trim().replace(/^图片[-－—]\s*/, '');
                 return tcap ? '[图片] ' + tcap.slice(0, 80) : '[图片]';
             }
             return '[图片]';
@@ -2358,17 +2444,17 @@
             return '[你说我猜] ' + sgPrev;
         }
         if (m.type === 'sayguess_record') return '[你说我猜]';
-        if (m.type === 'voice') return '[语音]' + (m.voiceText || stripApiTimelinePrefix(m.content) || '');
+        if (m.type === 'voice') return '[语音]' + (m.voiceText || String(m.content || '').trim() || '');
         if (m.type === 'html' || m.renderAsHtml) return '[HTML]';
         if (m.type === 'karaoke') {
-            var kTitle = m.karaokeTitle || stripApiTimelinePrefix(m.content).replace(/^【K歌[^】]*】\s*/, '') || 'K歌';
+            var kTitle = m.karaokeTitle || String(m.content || '').trim().replace(/^【K歌[^】]*】\s*/, '') || 'K歌';
             var kDur =
                 typeof m.karaokeDurationSec === 'number' && m.karaokeDurationSec > 0
                     ? ' · ' + Math.round(m.karaokeDurationSec) + '秒'
                     : '';
             return '[K歌] ' + kTitle + kDur;
         }
-        var body = stripApiTimelinePrefix(m.content) || '';
+        var body = String(m.content || '').trim();
         if (m.role === 'assistant') body = stripThinkingTags(body);
         return body;
     }
@@ -2382,22 +2468,72 @@
         return m;
     }
 
+    function hasNormalizedCardBody(m) {
+        if (!m) return false;
+        return !!(
+            (m.type === 'transfer' && m.redPacket) ||
+            (m.type === 'location' && m.locationCard) ||
+            (m.type === 'takeout' && m.takeoutOrder) ||
+            (m.type === 'gift' && m.giftParcel) ||
+            (m.type === 'group_red_packet' && m.groupRedPacket) ||
+            (m.type === 'love_poem' && m.lovePoem) ||
+            (m.type === 'match_record' && m.matchRecord) ||
+            (m.type === 'sayguess_record' && m.sayguessRecord) ||
+            (m.coupleSpaceInvite && typeof m.coupleSpaceInvite === 'object') ||
+            (m.tajiePostShare && typeof m.tajiePostShare === 'object') ||
+            (m.tajieProfileShare && typeof m.tajieProfileShare === 'object') ||
+            (m.weijiePostShare && typeof m.weijiePostShare === 'object') ||
+            (m.weijieProfileShare && typeof m.weijieProfileShare === 'object')
+        );
+    }
+
     function savedMessageHasBody(m) {
         if (!m) return false;
-        if (m.type === 'transfer' && m.redPacket) return true;
-        if (m.type === 'location' && m.locationCard) return true;
-        if (m.type === 'takeout' && m.takeoutOrder) return true;
-        if (m.type === 'gift' && m.giftParcel) return true;
-        if (m.type === 'group_red_packet' && m.groupRedPacket) return true;
-        if (m.type === 'love_poem' && m.lovePoem) return true;
-        if (m.type === 'match_record' && m.matchRecord) return true;
-        if (m.type === 'sayguess_record' && m.sayguessRecord) return true;
+        if (hasNormalizedCardBody(m)) return true;
         if (m.type === 'voice') return !!(m.voiceText || m.content || m.voiceAudioIdbKey);
         if (m.type === 'image' || m.imageDataKey) return true;
         if (m.type === 'sticker') return !!(m.stickerBlobId || m.stickerUrl || m.stickerName || m.content);
         if (m.type === 'html' || m.renderAsHtml) return !!(m.htmlRaw || m.content);
-        if (m.coupleSpaceInvite) return true;
         return !!(m.content || m.voiceText);
+    }
+
+    function hasPersistableMessageBody(m) {
+        if (!m) return false;
+        return !!(
+            m.content ||
+            m.role === 'system' ||
+            m.type === 'image' ||
+            m.type === 'sticker' ||
+            m.type === 'location' ||
+            m.type === 'transfer' ||
+            m.type === 'takeout' ||
+            m.type === 'gift' ||
+            m.type === 'group_red_packet' ||
+            m.type === 'love_poem' ||
+            m.type === 'match_record' ||
+            (m.matchRecord && typeof m.matchRecord === 'object') ||
+            m.type === 'sayguess_record' ||
+            (m.sayguessRecord && typeof m.sayguessRecord === 'object') ||
+            (m.type === 'html' && (m.htmlRaw || m.content)) ||
+            (m.type === 'karaoke' && m.karaokeIdbKey) ||
+            hasNormalizedCardBody(m)
+        );
+    }
+
+    function isRealTimelineMessage(m, opts) {
+        opts = opts && typeof opts === 'object' ? opts : {};
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return false;
+        if (m.offlineMeet || isMomentsMemoryRow(m)) return false;
+        if (m.deleted) return false;
+        return hasPersistableMessageBody(m);
+    }
+
+    function isHistoricalTimelineAnchor(m) {
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return false;
+        if (m.offlineMeet || isMomentsMemoryRow(m)) return false;
+        if (normalizeConversationGap(m.conversationGap)) return true;
+        if (m.deleted) return false;
+        return isRealTimelineMessage(m);
     }
 
     function isMomentsMemoryRow(m) {
@@ -2698,7 +2834,7 @@
                 metaCache.chats = metaCache.chats.filter(function (ch) { return ch.id !== dup.id; });
                 dirty = true;
             });
-            keepMsgs.sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+            keepMsgs = sortMessagesByKnownTime(keepMsgs);
             metaCache.messagesByChat[keep.id] = keepMsgs;
             keep.chatSettings = normalizeChatSettings(keep.chatSettings);
             var last = keepMsgs.length ? keepMsgs[keepMsgs.length - 1] : null;
@@ -4223,10 +4359,7 @@
                 .filter(function (m) {
                     return m && !m.deleted && !m.offlineMeet && !isMomentsMemoryRow(m);
                 })
-                .map(normalizeMessage)
-                .sort(function (a, b) {
-                    return (a.createdAt || 0) - (b.createdAt || 0);
-                });
+                .map(normalizeMessage);
         },
 
         /** 聊天 UI：只 normalize 最近 N 条，避免大线程进入时卡顿 */
@@ -4246,9 +4379,7 @@
                 if (picked.length < lim) picked.push(raw);
             }
             picked.reverse();
-            var visible = picked.map(normalizeMessage).sort(function (a, b) {
-                return (a.createdAt || 0) - (b.createdAt || 0);
-            });
+            var visible = picked.map(normalizeMessage);
             return {
                 visible: visible,
                 total: total,
@@ -4265,10 +4396,7 @@
                 .filter(function (m) {
                     return m && !m.deleted && !isMomentsMemoryRow(m);
                 })
-                .map(normalizeMessage)
-                .sort(function (a, b) {
-                    return (a.createdAt || 0) - (b.createdAt || 0);
-                });
+                .map(normalizeMessage);
         },
 
         /**
@@ -4302,10 +4430,7 @@
                     merged.push(m);
                 });
             });
-            merged.sort(function (a, b) {
-                return (a.createdAt || 0) - (b.createdAt || 0);
-            });
-            return merged;
+            return sortMessagesByKnownTime(merged);
         },
 
         findMirrorByAppointmentMsgId: function (chatId, appointmentMsgId) {
@@ -4330,13 +4455,13 @@
         /** 线下镜像：同步写入内存线程供 API 立即读取；落盘防抖，避免发送时整库深拷贝卡顿 */
         mirrorOfflineMessage: function (chatId, msg) {
             if (!metaCache.messagesByChat[chatId]) metaCache.messagesByChat[chatId] = [];
-            var entry = normalizeMessage(
-                Object.assign({}, msg || {}, {
+            var mirrorRaw = Object.assign({}, msg || {}, {
                     id: (msg && msg.id) || uid('msg'),
-                    createdAt: (msg && msg.createdAt) || Date.now(),
+                    createdAt: validMessageCreatedAt(msg && msg.createdAt),
                     offlineMeet: true
-                })
-            );
+                });
+            delete mirrorRaw.conversationGap;
+            var entry = normalizeMessage(mirrorRaw);
             if (!entry.content && entry.role !== 'system') return null;
             metaCache.messagesByChat[chatId].push(entry);
             scheduleSaveMeta().catch(function () {});
@@ -4361,34 +4486,45 @@
 
         addMessagesImmediate: function (chatId, msgs) {
             if (!metaCache.messagesByChat[chatId]) metaCache.messagesByChat[chatId] = [];
+            var currentMessages = metaCache.messagesByChat[chatId];
             var list = Array.isArray(msgs) ? msgs : [];
             var added = [];
             var baseTs = Date.now();
+            var previousAnchor = null;
+            for (var ai = currentMessages.length - 1; ai >= 0; ai--) {
+                if (isHistoricalTimelineAnchor(currentMessages[ai])) {
+                    previousAnchor = currentMessages[ai];
+                    break;
+                }
+            }
             list.forEach(function (msg, i) {
-                var entry = normalizeMessage(Object.assign({}, msg || {}, { id: uid('msg'), createdAt: baseTs + i }));
-                var hasBody =
-                    entry.content ||
-                    entry.role === 'system' ||
-                    entry.type === 'image' ||
-                    entry.type === 'sticker' ||
-                    entry.type === 'location' ||
-                    entry.type === 'transfer' ||
-                    entry.type === 'takeout' ||
-                    entry.type === 'gift' ||
-                    entry.type === 'group_red_packet' ||
-                    entry.type === 'love_poem' ||
-                    entry.type === 'match_record' ||
-                    (entry.matchRecord && typeof entry.matchRecord === 'object') ||
-                    entry.type === 'sayguess_record' ||
-                    (entry.sayguessRecord && typeof entry.sayguessRecord === 'object') ||
-                    (entry.type === 'html' && (entry.htmlRaw || entry.content)) ||
-                    (entry.type === 'karaoke' && entry.karaokeIdbKey) ||
-                    (entry.tajiePostShare && typeof entry.tajiePostShare === 'object') ||
-                    (entry.tajieProfileShare && typeof entry.tajieProfileShare === 'object') ||
-                    (entry.weijiePostShare && typeof entry.weijiePostShare === 'object') ||
-                    (entry.weijieProfileShare && typeof entry.weijieProfileShare === 'object');
+                var suppliedTs = validMessageCreatedAt(msg && msg.createdAt);
+                var rawEntry = Object.assign({}, msg || {}, {
+                        id: uid('msg'),
+                        createdAt: msg && msg.offlineMeet ? suppliedTs : suppliedTs || baseTs + i
+                    });
+                delete rawEntry.conversationGap;
+                var entry = normalizeMessage(rawEntry);
+                var hasBody = hasPersistableMessageBody(entry);
                 if (!hasBody) return;
-                metaCache.messagesByChat[chatId].push(entry);
+                if (isRealTimelineMessage(entry, { newWrite: true })) {
+                    var currentTs = validMessageCreatedAt(entry.createdAt);
+                    var previousTs = validMessageCreatedAt(previousAnchor && previousAnchor.createdAt);
+                    var elapsedMs = currentTs && previousTs ? currentTs - previousTs : 0;
+                    entry.conversationGap =
+                        elapsedMs > 30 * 60 * 1000
+                            ? {
+                                  crossed: true,
+                                  elapsedMs: Math.floor(elapsedMs),
+                                  previousMessageId: String((previousAnchor && previousAnchor.id) || '').trim()
+                              }
+                            : { crossed: false };
+                    entry.conversationGap = normalizeConversationGap(entry.conversationGap) || { crossed: false };
+                    previousAnchor = entry;
+                } else {
+                    delete entry.conversationGap;
+                }
+                currentMessages.push(entry);
                 added.push(entry);
             });
             if (!added.length) return [];
@@ -4520,6 +4656,12 @@
             if (idx < 0) return Promise.reject(new Error('not_found'));
             var prevRow = metaCache.messagesByChat[chatId][idx];
             var merged = Object.assign({}, prevRow, patch || {});
+            merged.createdAt = validMessageCreatedAt(prevRow && prevRow.createdAt);
+            if (Object.prototype.hasOwnProperty.call(prevRow || {}, 'conversationGap')) {
+                merged.conversationGap = prevRow.conversationGap;
+            } else {
+                delete merged.conversationGap;
+            }
             if (patch && patch.content != null && !String(patch.imageDataKey || '').trim()) {
                 var fmtInfer = global.MiyaChatOnlineFormat;
                 if (fmtInfer && typeof fmtInfer.inferFieldsFromContent === 'function') {
@@ -4905,6 +5047,9 @@
         },
 
         defaultChatSettings: defaultChatSettings,
+
+        normalizeConversationGap: normalizeConversationGap,
+        isRealTimelineMessage: isRealTimelineMessage,
 
         flushMeta: function () {
             return flushSaveMeta({ withBackup: true, forceEmergency: true });

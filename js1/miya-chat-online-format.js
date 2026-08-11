@@ -2357,6 +2357,50 @@
         return out.filter(Boolean);
     }
 
+    function expandTimedRoleOutputCandidates(lines, options) {
+        var opts = options && typeof options === 'object' ? options : {};
+        var hasAllocator = typeof opts.nextCreatedAt === 'function';
+        var aw = global.MiyaChatAwareness;
+        var out = [];
+        (Array.isArray(lines) ? lines : []).forEach(function (line) {
+            var raw = String(line || '').trim();
+            if (!raw) return;
+            var createdAt = hasAllocator ? Number(opts.nextCreatedAt()) || 0 : 0;
+            var parseLine = raw;
+            if (hasAllocator && createdAt && aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
+                parseLine = aw.stripTimelinePrefixForDisplay(raw, {
+                    role: 'assistant',
+                    createdAt: createdAt
+                });
+            }
+
+            var bracketProbe = parseLine;
+            if (!hasAllocator && aw && typeof aw.splitCollapsedTimelineSegments === 'function') {
+                var timelineParts = aw.splitCollapsedTimelineSegments(raw);
+                parseLine = timelineParts[0] || raw;
+                bracketProbe = parseLine;
+            }
+            if (/^\[\d{4}\//.test(bracketProbe)) {
+                out.push({ line: parseLine, createdAt: createdAt });
+                return;
+            }
+
+            var expanded = collapseDuplicateBubbleLines(
+                filterStructuralLeakLines(
+                    expandArrQuoteLines(sanitizeRoleOutputLines(expandCollapsedOutputLines([parseLine])))
+                )
+            );
+            expanded.forEach(function (expandedLine, index) {
+                var segmentCreatedAt = createdAt;
+                if (index > 0 && hasAllocator) {
+                    segmentCreatedAt = Number(opts.nextCreatedAt()) || 0;
+                }
+                out.push({ line: expandedLine, createdAt: segmentCreatedAt });
+            });
+        });
+        return out;
+    }
+
     /** 模型把思维链/规划草稿泄漏进正文时的识别 */
     function looksLikeMetaPlanningText(text) {
         var t = trim(text);
@@ -2444,18 +2488,19 @@
         return meta.bubbles;
     }
 
-    function parseRoleOutputLinesMeta(lines, catalog) {
-        var arr = collapseDuplicateBubbleLines(
-            filterStructuralLeakLines(
-                expandArrQuoteLines(sanitizeRoleOutputLines(expandCollapsedOutputLines(lines)))
-            )
-        );
+    function parseRoleOutputLinesMeta(lines, catalog, options) {
+        var opts = options && typeof options === 'object' ? options : {};
+        var arr = expandTimedRoleOutputCandidates(lines, opts);
         var out = [];
         var pending = null;
+        var pendingCreatedAt = 0;
         var pendingRoleCall = null;
-        arr.forEach(function (line) {
-            var r = parseRoleOutputLine(line, catalog, pending);
+        arr.forEach(function (candidate) {
+            var createdAt = Number(candidate && candidate.createdAt) || 0;
+            var r = parseRoleOutputLine(candidate && candidate.line, catalog, pending);
             pending = r.pendingQuote;
+            if (pending) pendingCreatedAt = createdAt || pendingCreatedAt;
+            else pendingCreatedAt = 0;
             if (r.roleCall) pendingRoleCall = r.roleCall;
             if (r.translationZh && out.length) {
                 var last = out[out.length - 1];
@@ -2467,20 +2512,25 @@
                         last.translationZh = r.translationZh;
                     }
                 }
-            } else if (r.fields) out.push(r.fields);
+            } else if (r.fields) {
+                if (createdAt) r.fields.createdAt = createdAt;
+                out.push(r.fields);
+            }
         });
         if (pending) {
             var pendingStk = pending.match(RE_STICKER);
             if (pendingStk) {
                 var pendingSf = buildStickerFields(pendingStk[1], catalog, null);
                 if (pendingSf) {
+                    if (pendingCreatedAt) pendingSf.createdAt = pendingCreatedAt;
                     out.push(pendingSf);
                     pending = null;
                 }
             } else {
                 out.push({
                     type: 'text',
-                    content: stripOrphanMarkdownEmphasis(pending)
+                    content: stripOrphanMarkdownEmphasis(pending),
+                    createdAt: pendingCreatedAt || undefined
                 });
             }
         }

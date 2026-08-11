@@ -185,7 +185,7 @@
             var aw = global.MiyaChatAwareness;
             var t = String(m.content || '').trim();
             if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-                t = aw.stripTimelinePrefixForDisplay(t);
+                t = aw.stripTimelinePrefixForDisplay(t, m);
             }
             if (m.type === 'voice') t = String(m.voiceText || t).trim() || '[语音]';
             if (!t) continue;
@@ -217,7 +217,7 @@
             var aw = global.MiyaChatAwareness;
             var t = String(m.content || '').trim();
             if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-                t = aw.stripTimelinePrefixForDisplay(t);
+                t = aw.stripTimelinePrefixForDisplay(t, m);
             }
             if (m.type === 'voice') t = String(m.voiceText || t).trim() || '[语音]';
             if (!t) continue;
@@ -419,7 +419,7 @@
                     ? String(fmt.formatMessageForApi(m) || '').trim()
                     : String(m.content || '').trim();
             if (aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
-                body = aw.stripTimelinePrefixForDisplay(body);
+                body = aw.stripTimelinePrefixForDisplay(body, m);
             }
             if (!body) continue;
             if (body.length > 100) body = body.slice(0, 97) + '…';

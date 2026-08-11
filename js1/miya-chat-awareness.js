@@ -78,11 +78,7 @@
         return String(n).padStart(2, '0');
     }
 
-    /**
-     * Miya API 专用时间标记（⧗…›），仅注入模型请求，禁止出现在用户界面。
-     * 现行：⧗用户·7/16·周四·14:30› / ⧗角色·7/16·周四·14:32›（可含 15m· 间隔）
-     * 旧式：⧗u·… / ⧗a·… 仍须能剥离
-     */
+    /** 旧版 Miya API 时间标记；新协议改用完整本地时间方括号前缀，旧格式仍须能剥离。 */
     var RE_MIYA_WHO = '(?:用户|角色|[ua])';
     var RE_MIYA_API_TS_PREFIX = new RegExp(
         '^⧗' +
@@ -102,7 +98,6 @@
         /^\[(?:D-?\d+\s+)?\d{2}\/\d{2}\/\d{2}\s+\d{1,2}:\d{2}(?:\s+[UA](?:@[^\]]+)?)?\]\s*/i;
     var RE_LEGACY_API_TS_GLOBAL =
         /\[(?:D-?\d+\s+)?\d{2}\/\d{2}\/\d{2}\s+\d{1,2}:\d{2}(?:\s+[UA](?:@[^\]]+)?)?\]\s*/gi;
-
     function formatHmForTz(ts, tz) {
         var p = wallClockPartsInTz(ts, tz);
         if (!p || !Number.isFinite(p.hour) || !Number.isFinite(p.minute)) {
@@ -240,14 +235,16 @@
         var out = String(text || '').trim();
         var guard = 0;
         while (guard++ < 8) {
-            var next = out.replace(RE_MIYA_API_TS_PREFIX, '').replace(RE_LEGACY_API_TS_PREFIX, '');
+            var next = out
+                .replace(RE_MIYA_API_TS_PREFIX, '')
+                .replace(RE_LEGACY_API_TS_PREFIX, '');
             if (next === out) break;
             out = next.trim();
         }
         return out;
     }
 
-    /** 移除正文中任意位置的 API 时间标记（模型不听话时的兜底） */
+    /** 仅供旧协议解析兼容：移除正文中任意位置的旧 API 时间标记。 */
     function stripAllApiTimelineMarkers(text) {
         var out = String(text || '');
         if (!out) return '';
@@ -278,38 +275,39 @@
         return s;
     }
 
-    /** 从展示/存储正文中移除 API 时间标记（行首 + 正文内嵌） */
-    function stripTimelinePrefixForDisplay(text) {
-        var s = String(text || '');
+    /** 展示兼容仅处理 assistant 开头协议；user/system 正文不按文本形状清洗。 */
+    function stripTimelinePrefixForDisplay(text, message) {
+        var s = String(text || '').trim();
         if (!s) return '';
-        if (s.indexOf(' / ') >= 0) {
-            return s
-                .split(' / ')
-                .map(function (part) {
-                    return stripTimelinePrefixForDisplay(part);
-                })
-                .filter(Boolean)
-                .join(' / ');
+        if (!message || message.role !== 'assistant') return s;
+        var expected = buildMiyaApiTimelinePrefix(message.createdAt);
+        var guard = 0;
+        while (s && guard++ < 8) {
+            var next = s.replace(RE_MIYA_API_TS_PREFIX, '').trim();
+            if (expected && next === s && s.slice(0, expected.length) === expected) {
+                next = s.slice(expected.length).trim();
+            }
+            if (next === s) break;
+            s = next;
         }
-        s = stripAllApiTimelineMarkers(s);
-        return stripOneTimelinePrefix(s);
+        return s;
     }
 
-    /** 将模型误合并的一行多段（⧗用户·/⧗角色·/旧 ⧗u· 内嵌）拆成多条气泡正文 */
+    /** 角色模型输出仅清理整行开头连续旧 ⧗ 协议；正文内旧标记始终作为正文保留。 */
     function splitCollapsedTimelineSegments(text) {
         var raw = String(text || '').trim();
         if (!raw) return [];
-        if (raw.indexOf('⧗') < 0) return [stripTimelinePrefixForDisplay(raw)];
-        var parts = raw.split(/(?=⧗(?:用户|角色|[ua])·)/);
-        var out = [];
-        parts.forEach(function (p) {
-            var s = stripTimelinePrefixForDisplay(String(p || '').trim());
-            if (s) out.push(s);
-        });
-        return out.length ? out : [stripTimelinePrefixForDisplay(raw)];
+        var out = raw;
+        var guard = 0;
+        while (out && guard++ < 8) {
+            var next = out.replace(RE_MIYA_API_TS_PREFIX, '').trim();
+            if (next === out) break;
+            out = next;
+        }
+        return [out || raw];
     }
 
-    /** 角色回复入库前：清洗各字段内嵌的时间戳标记 */
+    /** 角色回复入库前：仅清洗开头、且可由角色消息自身上下文确认的时间协议。 */
     function sanitizeRoleMessageFields(fields) {
         if (!fields || typeof fields !== 'object') return fields;
         var fmt = global.MiyaChatOnlineFormat;
@@ -318,57 +316,61 @@
                 ? fmt.stripOrphanMarkdownEmphasis
                 : null;
         var out = Object.assign({}, fields);
-        if (out.content != null) out.content = stripTimelinePrefixForDisplay(String(out.content));
+        if (out.content != null) out.content = stripTimelinePrefixForDisplay(String(out.content), out);
         if (stripStars && out.role === 'assistant' && out.content != null) {
             out.content = stripStars(out.content);
         }
-        if (out.voiceText != null) out.voiceText = stripTimelinePrefixForDisplay(String(out.voiceText));
+        if (out.voiceText != null) out.voiceText = stripTimelinePrefixForDisplay(String(out.voiceText), out);
         if (stripStars && out.role === 'assistant' && out.voiceText != null) {
             out.voiceText = stripStars(out.voiceText);
         }
-        if (out.stickerName != null) out.stickerName = stripTimelinePrefixForDisplay(String(out.stickerName));
+        if (out.callLine != null) out.callLine = stripTimelinePrefixForDisplay(String(out.callLine), out);
+        if (stripStars && out.role === 'assistant' && out.callLine != null) {
+            out.callLine = stripStars(out.callLine);
+        }
+        if (out.stickerName != null) out.stickerName = stripTimelinePrefixForDisplay(String(out.stickerName), out);
         if (out.quoteRef && typeof out.quoteRef === 'object' && out.quoteRef.text != null) {
             out.quoteRef = Object.assign({}, out.quoteRef, {
-                text: stripQuotePromptLeakage(stripTimelinePrefixForDisplay(String(out.quoteRef.text)))
+                text: stripQuotePromptLeakage(String(out.quoteRef.text))
             });
         }
         if (out.locationCard && typeof out.locationCard === 'object') {
             out.locationCard = Object.assign({}, out.locationCard);
             if (out.locationCard.name != null) {
-                out.locationCard.name = stripTimelinePrefixForDisplay(String(out.locationCard.name));
+                out.locationCard.name = stripTimelinePrefixForDisplay(String(out.locationCard.name), out);
             }
             if (out.locationCard.address != null) {
-                out.locationCard.address = stripTimelinePrefixForDisplay(String(out.locationCard.address));
+                out.locationCard.address = stripTimelinePrefixForDisplay(String(out.locationCard.address), out);
             }
         }
         if (out.redPacket && typeof out.redPacket === 'object' && out.redPacket.note != null) {
             out.redPacket = Object.assign({}, out.redPacket, {
-                note: stripTimelinePrefixForDisplay(String(out.redPacket.note))
+                note: stripTimelinePrefixForDisplay(String(out.redPacket.note), out)
             });
         }
         if (out.takeoutOrder && typeof out.takeoutOrder === 'object') {
             out.takeoutOrder = Object.assign({}, out.takeoutOrder);
             if (out.takeoutOrder.shop != null) {
-                out.takeoutOrder.shop = stripTimelinePrefixForDisplay(String(out.takeoutOrder.shop));
+                out.takeoutOrder.shop = stripTimelinePrefixForDisplay(String(out.takeoutOrder.shop), out);
             }
             if (out.takeoutOrder.items != null) {
-                out.takeoutOrder.items = stripTimelinePrefixForDisplay(String(out.takeoutOrder.items));
+                out.takeoutOrder.items = stripTimelinePrefixForDisplay(String(out.takeoutOrder.items), out);
             }
             if (out.takeoutOrder.note != null) {
-                out.takeoutOrder.note = stripTimelinePrefixForDisplay(String(out.takeoutOrder.note));
+                out.takeoutOrder.note = stripTimelinePrefixForDisplay(String(out.takeoutOrder.note), out);
             }
         }
         if (out.giftParcel && typeof out.giftParcel === 'object') {
             out.giftParcel = Object.assign({}, out.giftParcel);
             if (out.giftParcel.note != null) {
-                out.giftParcel.note = stripTimelinePrefixForDisplay(String(out.giftParcel.note));
+                out.giftParcel.note = stripTimelinePrefixForDisplay(String(out.giftParcel.note), out);
             }
             if (Array.isArray(out.giftParcel.items)) {
                 out.giftParcel.items = out.giftParcel.items.map(function (it) {
                     if (!it || typeof it !== 'object') return it;
                     return Object.assign({}, it, {
-                        name: it.name != null ? stripTimelinePrefixForDisplay(String(it.name)) : it.name,
-                        shop: it.shop != null ? stripTimelinePrefixForDisplay(String(it.shop)) : it.shop
+                        name: it.name != null ? stripTimelinePrefixForDisplay(String(it.name), out) : it.name,
+                        shop: it.shop != null ? stripTimelinePrefixForDisplay(String(it.shop), out) : it.shop
                     });
                 });
             }
@@ -462,23 +464,71 @@
         return (i >= 0 ? s.slice(i + 1) : s).replace(/_/g, '');
     }
 
-    function buildMiyaApiTimelinePrefix(ts, nowTs, tz, isUser, tzDiffers, prevTs) {
-        var ct = Number(ts);
-        if (!Number.isFinite(ct) || ct <= 0) return '';
-        var md = formatMonthDaySlashForTz(ct, tz);
-        var wd = formatWeekdayZhForTz(ct, tz);
-        var hm = formatHmForTz(ct, tz);
-        if (!md || !hm || !wd) return '';
-        var who = isUser ? '用户' : '角色';
-        var tzPart = tzDiffers && tz ? '@' + shortTzTag(tz) : '';
-        var elapsedPart = '';
-        var pt = Number(prevTs);
-        if (Number.isFinite(pt) && pt > 0 && ct > pt) {
-            var em = Math.round((ct - pt) / 60000);
-            if (em >= 1 && em < 1440) elapsedPart = em + 'm·';
+    function isValidMessageTimestamp(value) {
+        var ts = Number(value);
+        return Number.isFinite(ts) && ts > 0;
+    }
+
+    function formatLocalMessageDateTime(ts) {
+        if (!isValidMessageTimestamp(ts)) return '';
+        var d = new Date(Number(ts));
+        if (Number.isNaN(d.getTime())) return '';
+        return (
+            d.getFullYear() +
+            '/' +
+            pad2(d.getMonth() + 1) +
+            '/' +
+            pad2(d.getDate()) +
+            '-星期' +
+            '日一二三四五六'.charAt(d.getDay()) +
+            '-' +
+            pad2(d.getHours()) +
+            ':' +
+            pad2(d.getMinutes()) +
+            ':' +
+            pad2(d.getSeconds())
+        );
+    }
+
+    function buildMiyaApiTimelinePrefix(ts) {
+        var formatted = formatLocalMessageDateTime(ts);
+        return formatted ? '[' + formatted + ']' : '';
+    }
+
+    function resolveMessageFormatter(formatter) {
+        return formatter || global.MiyaChatOnlineFormat || null;
+    }
+
+    function isRealChatMessage(m, formatter) {
+        var st = global.miyaChatStore;
+        if (st && typeof st.isRealTimelineMessage === 'function') {
+            return st.isRealTimelineMessage(m);
         }
-        /* 用户/角色 + 绝对月日 + 周几 + HH:mm；禁止今/昨相对日 */
-        return '⧗' + who + '·' + elapsedPart + md + '·' + wd + '·' + hm + tzPart + '›';
+        if (!m || m.deleted || (m.role !== 'user' && m.role !== 'assistant')) return false;
+        var fmt = resolveMessageFormatter(formatter);
+        if (fmt && typeof fmt.shouldOmitMessage === 'function' && fmt.shouldOmitMessage(m)) return false;
+        var body =
+            fmt && typeof fmt.formatMessageForApi === 'function'
+                ? fmt.formatMessageForApi(m)
+                : String(m.content || '').trim();
+        return !!String(body || '').trim();
+    }
+
+    function buildConversationGapReminder(messageOrGap) {
+        var rawGap =
+            messageOrGap && messageOrGap.conversationGap && typeof messageOrGap.conversationGap === 'object'
+                ? messageOrGap.conversationGap
+                : messageOrGap;
+        var st = global.miyaChatStore;
+        var gap =
+            st && typeof st.normalizeConversationGap === 'function'
+                ? st.normalizeConversationGap(rawGap)
+                : rawGap && rawGap.crossed === true && Number.isFinite(Number(rawGap.elapsedMs)) && Number(rawGap.elapsedMs) > 30 * 60 * 1000
+                  ? { crossed: true, elapsedMs: Math.floor(Number(rawGap.elapsedMs)) }
+                  : null;
+        if (!gap || gap.crossed !== true) return '';
+        var duration = formatPreciseDurationZh(gap.elapsedMs);
+        return duration ? '【对话间隔提醒】距离上次对话经过了 ' + duration + '。' : '';
     }
 
     function formatRoughDurationZh(ms) {
@@ -632,55 +682,33 @@
             ].join('\n');
         }
         var nowTs = Date.now();
-        var userTz = ta.real.userTz;
-        var roleTz = ta.real.roleTz;
         var userLast = historyLastTs(history, 'user');
         var asstLast = historyLastTs(history, 'assistant');
-        var userSilentTxt = userLast ? formatPreciseDurationZh(nowTs - userLast) : '';
         var lines = ['【时间运转】'];
-        lines.push(
-            '- 现在·用户(' +
-                userTz +
-                '): ' +
-                formatDateWeekForTz(nowTs, userTz) +
-                ' ' +
-                formatHmForTz(nowTs, userTz)
-        );
-        lines.push(
-            '- 现在·角色(' +
-                roleTz +
-                '): ' +
-                formatDateWeekForTz(nowTs, roleTz) +
-                ' ' +
-                formatHmForTz(nowTs, roleTz)
-        );
+        lines.push('- 浏览器本地当前时间: ' + formatLocalMessageDateTime(nowTs));
         if (userLast) {
-            lines.push(
-                '- 用户最新发言: ' +
-                    formatFullDateTimeForTz(userLast, userTz) +
-                    (userSilentTxt ? '（距今 ' + userSilentTxt + '）' : '')
-            );
+            lines.push('- 用户最新发言: ' + formatLocalMessageDateTime(userLast));
         }
         if (asstLast) {
-            lines.push('- 你方最新发言: ' + formatFullDateTimeForTz(asstLast, roleTz));
+            lines.push('- 你方最新发言: ' + formatLocalMessageDateTime(asstLast));
         }
         if (ta.real.strength === 'strong') {
             var trailing = trailingUserBurstMeta(history);
             if (trailing.count > 0 && trailing.firstTs) {
                 lines.push(
-                    '- 末尾 ' +
+                        '- 末尾 ' +
                         trailing.count +
                         ' 条用户消息待回复；最早 ' +
-                        formatFullDateTimeForTz(trailing.firstTs, userTz) +
+                        formatLocalMessageDateTime(trailing.firstTs) +
                         '，按真实发送时刻理解，勿默认成刚刚。'
                 );
             }
         }
         lines.push(
-            '- 每条历史消息前缀形如 ⧗用户·7/16·周四·14:30› / ⧗角色·…：月日+周几+HH:mm 即该条真实发送时刻；须对照「现在」判断早晚，勿把历史钟点当成此刻。'
+            '- 每条真实聊天消息前缀形如 [2026/08/11-星期二-22:58:05]，即该条固定的浏览器本地发送时刻。'
         );
-        lines.push('- 禁止在正文输出 ⧗、› 或任何时间戳标记。');
-        lines.push('- 「多久没回」只看用户最新发言；默认正文不要报时或强调过了多久。');
+        lines.push('- 禁止在正文输出方括号时间前缀、⧗、› 或任何时间戳标记。');
+        lines.push('- 默认正文不要报时或重复强调经过了多久。');
         return lines.join('\n');
     }
 
@@ -688,38 +716,7 @@
         var ta = normalizeTimeAwareness(chatSettings && chatSettings.timeAwareness);
         if (!ta.enabled) return '';
         var nowTs = Date.now();
-        var userTz = ta.real.userTz;
-        var roleTz = ta.real.roleTz;
-        var userLast = historyLastTs(history, 'user');
-        var asstLast = historyLastTs(history, 'assistant');
-        var trailing = trailingUserBurstMeta(history);
-        var lines = ['【本轮时间】'];
-        lines.push(
-            '- 现在: ' + formatDateWeekForTz(nowTs, roleTz) + ' ' + formatHmForTz(nowTs, roleTz)
-        );
-        if (trailing.count > 0 && trailing.firstTs) {
-            lines.push(
-                '- 待回复用户消息最早发于 ' +
-                    formatFullDateTimeForTz(trailing.firstTs, userTz) +
-                    '（距今 ' +
-                    formatPreciseDurationZh(nowTs - trailing.firstTs) +
-                    '），按该时刻理解。'
-            );
-        } else if (userLast) {
-            lines.push(
-                '- 用户上次发言: ' +
-                    formatFullDateTimeForTz(userLast, userTz) +
-                    '（距今 ' +
-                    formatPreciseDurationZh(nowTs - userLast) +
-                    '）' +
-                    (asstLast && asstLast > userLast
-                        ? '；你方上次: ' + formatFullDateTimeForTz(asstLast, roleTz)
-                        : '')
-            );
-        }
-        if (lines.length <= 1) return '';
-        lines.push('- 正文默认不必提时间。');
-        return lines.join('\n');
+        return ['【本轮时间】', '- 浏览器本地当前时间: ' + formatLocalMessageDateTime(nowTs), '- 正文默认不必提时间。'].join('\n');
     }
 
     function buildPlaceAwarenessRules(chatSettings, contact, profile) {
@@ -928,16 +925,13 @@
     }
 
     function stampMessageForApi(text, m, chatSettings, nowTs, prevTs) {
-        var body = stripTimelinePrefixForDisplay(String(text || ''));
-        if (!body || !isTimeStampEnabled(chatSettings)) return body;
-        var ta = normalizeTimeAwareness(chatSettings.timeAwareness);
-        var isUser = m && m.role === 'user';
-        var tz = isUser ? ta.real.userTz : ta.real.roleTz;
-        var tzDiffers = ta.real.userTz !== ta.real.roleTz;
-        var ts = Number(m && m.createdAt);
-        if (!Number.isFinite(ts) || ts <= 0) return body;
-        var prefix = buildMiyaApiTimelinePrefix(ts, nowTs || Date.now(), tz, isUser, tzDiffers, prevTs);
+        var body = String(text || '').trim();
+        if (!body || !isRealChatMessage(m)) return body;
+        var prefix = buildMiyaApiTimelinePrefix(m && m.createdAt);
         if (!prefix) return body;
+        if (m && m._apiTimelineStamped === true && body.slice(0, prefix.length) === prefix) {
+            body = body.slice(prefix.length).trim();
+        }
         return prefix + ' ' + body;
     }
 
@@ -1284,6 +1278,11 @@
         buildRelationshipLine: buildRelationshipLine,
         buildChronicleRelationshipBlock: buildChronicleRelationshipBlock,
         buildSummaryContextBlock: buildSummaryContextBlock,
+        isValidMessageTimestamp: isValidMessageTimestamp,
+        formatLocalMessageDateTime: formatLocalMessageDateTime,
+        isRealChatMessage: isRealChatMessage,
+        buildConversationGapReminder: buildConversationGapReminder,
+        buildMiyaApiTimelinePrefix: buildMiyaApiTimelinePrefix,
         stripTimelinePrefixForDisplay: stripTimelinePrefixForDisplay,
         stripQuotePromptLeakage: stripQuotePromptLeakage,
         stripAllApiTimelineMarkers: stripAllApiTimelineMarkers,

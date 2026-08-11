@@ -831,21 +831,36 @@
         var arr = Array.isArray(lines) ? lines : [];
         var out = [];
 
+        function prepareCallLine(line) {
+            var createdAt =
+                typeof opts.nextCreatedAt === 'function' ? Number(opts.nextCreatedAt()) || 0 : 0;
+            var text = String(line || '').trim();
+            var aw = global.MiyaChatAwareness;
+            if (createdAt && aw && typeof aw.stripTimelinePrefixForDisplay === 'function') {
+                text = aw.stripTimelinePrefixForDisplay(text, {
+                    role: 'assistant',
+                    createdAt: createdAt
+                });
+            }
+            return { text: text, createdAt: createdAt };
+        }
+
         if (mode === 'ring') {
-            var joined = arr.join('\n');
-            var first = arr[0] ? String(arr[0]).trim() : '';
+            var prepared = arr.map(prepareCallLine);
+            var joined = prepared.map(function (item) { return item.text; }).join('\n');
+            var first = prepared[0] ? prepared[0].text : '';
             if (/^通话拒接/.test(first) || /^通话拒接/.test(joined)) {
                 return {
                     bubbles: [],
                     ringRejected: true,
-                    rejectNote: arr.slice(1).join(' ').trim() || '对方未接听'
+                    rejectNote: prepared.slice(1).map(function (item) { return item.text; }).join(' ').trim() || '对方未接听'
                 };
             }
             var accepted = /^通话接听/.test(first) || joined.indexOf('通话接听') >= 0;
-            arr.forEach(function (ln) {
-                var t = String(ln || '').trim();
+            prepared.forEach(function (item) {
+                var t = item.text;
                 if (!t || /^通话接听/.test(t) || isCallDialCommandLine(t)) return;
-                out.push({ role: 'assistant', callLine: t });
+                out.push({ role: 'assistant', callLine: t, createdAt: item.createdAt || undefined });
             });
             return {
                 bubbles: out,
@@ -855,11 +870,12 @@
         }
 
         arr.forEach(function (ln) {
-            var t = String(ln || '').trim();
+            var item = prepareCallLine(ln);
+            var t = item.text;
             if (!t) return;
             if (/^通话拒接/.test(t) || /^通话接听/.test(t)) return;
             if (isCallDialCommandLine(t) || /^发起(?:语音|视频)通话/.test(t)) return;
-            out.push({ role: 'assistant', callLine: t });
+            out.push({ role: 'assistant', callLine: t, createdAt: item.createdAt || undefined });
         });
         return { bubbles: out };
     }

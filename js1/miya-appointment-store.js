@@ -18,6 +18,27 @@
         return (prefix || 'ap') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
     }
 
+    function validCreatedAt(value) {
+        var ts = Number(value);
+        return Number.isFinite(ts) && ts > 0 ? ts : 0;
+    }
+
+    function sortByKnownCreatedAt(list) {
+        return (Array.isArray(list) ? list : [])
+            .map(function (value, index) {
+                return { value: value, index: index, createdAt: validCreatedAt(value && value.createdAt) };
+            })
+            .sort(function (a, b) {
+                if (a.createdAt && b.createdAt) return a.createdAt - b.createdAt || a.index - b.index;
+                if (a.createdAt) return -1;
+                if (b.createdAt) return 1;
+                return a.index - b.index;
+            })
+            .map(function (row) {
+                return row.value;
+            });
+    }
+
     function clampInt(v, lo, hi, fb) {
         var n = parseInt(v, 10);
         if (!Number.isFinite(n)) return fb;
@@ -350,7 +371,7 @@
             id: String(row.id || '').trim() || uid('msg'),
             role: role,
             content: String(row.content || '').trim(),
-            createdAt: Number(row.createdAt) || Date.now(),
+            createdAt: validCreatedAt(row.createdAt),
             deleted: !!row.deleted,
             editedAt: Number(row.editedAt) || 0
         };
@@ -420,7 +441,7 @@
             row = st.mirrorOfflineMessage(targetChatId, {
                 role: msg.role,
                 content: msg.content,
-                createdAt: msg.createdAt || Date.now(),
+                createdAt: validCreatedAt(msg.createdAt),
                 appointmentSessionId: sess.id,
                 appointmentMsgId: msg.id,
                 renderAsHtml: !!msg.renderAsHtml,
@@ -431,7 +452,7 @@
             st.addMessage(targetChatId, {
                 role: msg.role,
                 content: msg.content,
-                createdAt: msg.createdAt || Date.now(),
+                createdAt: validCreatedAt(msg.createdAt),
                 offlineMeet: true,
                 renderAsHtml: !!msg.renderAsHtml,
                 htmlRaw: msg.htmlRaw || msg.content,
@@ -545,7 +566,7 @@
             chatId: chatId,
             contactId: contactId,
             cast: cast,
-            createdAt: Number(raw.createdAt) || Date.now(),
+            createdAt: validCreatedAt(raw.createdAt),
             closedAt: Number(raw.closedAt) || 0,
             title: String(raw.title || '').trim(),
             messages: msgs,
@@ -736,20 +757,21 @@
 
     function buildSessionFromMirrorMsgs(chatId, contactId, sessionId, msgs) {
         var sid = String(sessionId || '').trim() || uid('sess');
-        var sorted = (msgs || []).slice().sort(function (a, b) {
-            return (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0);
-        });
+        var sorted = sortByKnownCreatedAt(msgs);
         if (!sorted.length) return null;
-        var createdAt = Number(sorted[0].createdAt) || Date.now();
-        var closedAt = Number(sorted[sorted.length - 1].createdAt) || createdAt;
+        var createdAt = validCreatedAt(sorted[0].createdAt);
+        var closedAt = 0;
+        for (var si = sorted.length - 1; si >= 0; si--) {
+            closedAt = validCreatedAt(sorted[si].createdAt);
+            if (closedAt) break;
+        }
         var normMsgs = sorted
             .map(function (m) {
-                var ts = Number(m.createdAt) || createdAt;
                 return normalizeMessage({
                     id: String(m.appointmentMsgId || m.id || '').trim() || uid('msg'),
                     role: m.role,
                     content: m.content,
-                    createdAt: ts,
+                    createdAt: validCreatedAt(m.createdAt),
                     chatMirrorId: m.id,
                     renderAsHtml: !!m.renderAsHtml,
                     htmlRaw: m.htmlRaw || m.content,
@@ -764,7 +786,7 @@
             contactId: contactId,
             createdAt: createdAt,
             closedAt: closedAt,
-            title: '恢复 · ' + new Date(createdAt).toLocaleDateString('zh-CN'),
+            title: createdAt ? '恢复 · ' + new Date(createdAt).toLocaleDateString('zh-CN') : '恢复的线下记录',
             messages: normMsgs,
             summaryList: []
         });
@@ -815,19 +837,17 @@
                 var sess = buildSessionFromMirrorMsgs(chatId, contactId, sid, explicitMap[sid]);
                 if (sess) sessions.push(sess);
             });
-            noSid.sort(function (a, b) {
-                return (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0);
-            });
+            noSid = sortByKnownCreatedAt(noSid);
             var block = [];
             noSid.forEach(function (m) {
-                var ts = Number(m.createdAt) || Date.now();
+                var ts = validCreatedAt(m.createdAt);
                 if (block.length) {
-                    var prevTs = Number(block[block.length - 1].createdAt) || 0;
-                    if (ts - prevTs > GAP_MS) {
+                    var prevTs = validCreatedAt(block[block.length - 1].createdAt);
+                    if (ts && prevTs && ts - prevTs > GAP_MS) {
                         var built = buildSessionFromMirrorMsgs(
                             chatId,
                             contactId,
-                            'rec_' + chatId + '_' + String(Number(block[0].createdAt) || Date.now()),
+                            'rec_' + chatId + '_' + String(validCreatedAt(block[0].createdAt) || 'unknown'),
                             block
                         );
                         if (built) sessions.push(built);
@@ -840,7 +860,7 @@
                 var builtLast = buildSessionFromMirrorMsgs(
                     chatId,
                     contactId,
-                    'rec_' + chatId + '_' + String(Number(block[0].createdAt) || Date.now()),
+                    'rec_' + chatId + '_' + String(validCreatedAt(block[0].createdAt) || 'unknown'),
                     block
                 );
                 if (builtLast) sessions.push(builtLast);
@@ -937,9 +957,7 @@
                         added += 1;
                     });
                     if (added > 0) {
-                        ex.messages.sort(function (a, b) {
-                            return (a.createdAt || 0) - (b.createdAt || 0);
-                        });
+                        ex.messages = sortByKnownCreatedAt(ex.messages);
                         ex.closedAt = Math.max(Number(ex.closedAt) || 0, Number(norm.closedAt) || 0) || ex.closedAt;
                         if (!String(ex.contactId || '').trim() && norm.contactId) ex.contactId = norm.contactId;
                         bucket.sessions[idx] = normalizeSession(ex);
@@ -1645,8 +1663,11 @@
         addMessage: function (chatId, sessionId, fields) {
             var sess = store.getSession(chatId, sessionId);
             if (!sess) return null;
+            var suppliedCreatedAt = validCreatedAt(fields && fields.createdAt);
             var msg = normalizeMessage(
-                Object.assign({ id: uid('msg'), createdAt: Date.now() }, fields || {})
+                Object.assign({ id: uid('msg') }, fields || {}, {
+                    createdAt: suppliedCreatedAt || Date.now()
+                })
             );
             if (!msg || !String(msg.content || '').trim()) return null;
             sess.messages.push(msg);

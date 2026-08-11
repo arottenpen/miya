@@ -1013,7 +1013,6 @@
 
     function appendGroupHistory(apiMessages, slice, members, profile, settings, store, groupChatId) {
         var aw = global.MiyaChatAwareness;
-        var nowTs = Date.now();
         var userBuf = [];
         var asstBuf = [];
         function flushUser() {
@@ -1051,7 +1050,7 @@
             var body = formatGroupMessageBody(m, members, profile, store, groupChatId);
             if (!body) return;
             if (aw && typeof aw.stampMessageForApi === 'function') {
-                body = aw.stampMessageForApi(body, m, settings, nowTs);
+                body = aw.stampMessageForApi(body, m, settings);
             }
             if (m.role === 'user') {
                 flushAssistant();
@@ -1285,6 +1284,9 @@
                 '以下消息均来自本群（非单聊）；阅读时留意每行开头的「角色名：」或「用户名：」。'
         });
         appendGroupHistory(apiMessages, slice, members, profile, settings, store, chatId);
+        if (opts.conversationGapReminder) {
+            apiMessages.push({ role: 'system', content: String(opts.conversationGapReminder) });
+        }
 
         var grpTailState = 'empty';
         var bgMod = global.MiyaChatBackground;
@@ -1479,8 +1481,9 @@
         return next;
     }
 
-    function parseGroupOutputLines(lines, members, store, groupChatId, catalog, profile) {
+    function parseGroupOutputLines(lines, members, store, groupChatId, catalog, profile, options) {
         var fmt = global.MiyaChatOnlineFormat;
+        var opts = options && typeof options === 'object' ? options : {};
         var out = [];
         var lastSpeakerId = '';
         var batchLines = [];
@@ -1514,13 +1517,21 @@
                 return;
             }
             if (fmt && typeof fmt.parseRoleOutputLinesMeta === 'function') {
-                var parsed = fmt.parseRoleOutputLinesMeta(batchLines, catalog);
+                var parsed = fmt.parseRoleOutputLinesMeta(batchLines, catalog, {
+                    nextCreatedAt: opts.nextCreatedAt
+                });
                 (parsed.bubbles || []).forEach(function (b) {
                     pushGroupBubble(b, batchSpeakerId);
                 });
             } else {
                 batchLines.forEach(function (raw) {
-                    if (raw) pushGroupBubble({ type: 'text', content: raw }, batchSpeakerId);
+                    if (!raw) return;
+                    var createdAt =
+                        typeof opts.nextCreatedAt === 'function' ? Number(opts.nextCreatedAt()) || 0 : 0;
+                    pushGroupBubble(
+                        { type: 'text', content: raw, createdAt: createdAt || undefined },
+                        batchSpeakerId
+                    );
                 });
             }
             batchLines = [];
@@ -1582,6 +1593,10 @@
                     profile
                 );
                 if (grpParsed) {
+                    if (typeof opts.nextCreatedAt === 'function') {
+                        var grpCreatedAt = Number(opts.nextCreatedAt()) || 0;
+                        if (grpCreatedAt) grpParsed.createdAt = grpCreatedAt;
+                    }
                     pushGroupBubble(grpParsed, contact.id);
                 }
                 return;
