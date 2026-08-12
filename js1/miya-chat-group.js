@@ -770,7 +770,7 @@
             '【本轮输出格式·群聊·强制复核】',
             '当前为群聊，不是单聊：正文每行须「角色名：内容」，角色名仅限 ' +
                 roster +
-                '；禁止 <heartvoice> 与心声块；禁止单聊三段式（thinking+正文+心声）；类型行须写在对应角色名后的同一行内。'
+                '；禁止 <heartvoice> 与心声块；禁止单聊三段式（thinking+正文+心声）；类型行须写在对应角色名后的同一行内；引用行必须独占一行，回复须由同一角色从下一条「角色名：内容」协议行开始。'
         ];
         if (settings && settings.autoTranslate) {
             var tr = global.MiyaChatTranslate;
@@ -794,10 +794,11 @@
             roster +
             ' 之一；每行一条气泡（用中文冒号「：」，勿用【】包裹角色名）。\n' +
             '3、仅上述成员可发言；禁止替用户发言；禁止 <heartvoice> 与任何心声块（心声仅存在于单聊，群聊永不输出）。\n' +
-            '4、成员可发表情包、引用他人原话、发语音（均写在「角色名：」后的同一行内）：\n' +
+            '4、成员可发表情包、引用他人原话、发语音；每条仍须使用完整的「角色名：内容」协议行：\n' +
             '   · 语音：角色名：语音-台词（例：肖闻：语音-你在哪）\n' +
             '   · 表情包：角色名：表情包-名称（名称须来自下方「群聊可用表情包」列表，含通用表情包与各成员专属包）\n' +
-            '   · 引用：角色名：引用-被引用原话摘抄：你的回复（可引用用户或任意群成员说过的话，摘抄须与原文一致）\n' +
+            '   · 引用：角色名：引用-被引用原话摘抄（该引用行必须独占一行；可引用用户或任意群成员说过的话，摘抄须与原文一致；摘抄中的任意全角/半角冒号及其它自然标点都属于原话，不是引用与回复的分隔符）\n' +
+            '   · 引用回复：紧接下一行写「同一角色名：你的回复」；若继续回复，每条仍各占一条「同一角色名：内容」协议行；禁止把回复接在引用行末尾\n' +
             '   · 红包：角色名：红包-拼手气-金额-份数-祝福语；角色名：红包-专属-金额-目标名-祝福语\n' +
             '   · 亦可：图片-描述（一行一条）\n' +
             '5、多人可接话，注意彼此关系与人设；勿复读群聊/单聊已有原句。'
@@ -1438,49 +1439,6 @@
         };
     }
 
-    function splitGroupQuoteReplyBoundary(body) {
-        var raw = trim(body);
-        if (!raw) return null;
-        var seps = ['：', ':', '——', '—', '–', '→', '=>', '->', '｜', '|', '；', ';'];
-        var i;
-        for (i = 0; i < seps.length; i++) {
-            var sep = seps[i];
-            var idx = raw.lastIndexOf(sep);
-            if (idx <= 0) continue;
-            var quotedText = trim(raw.slice(0, idx));
-            var replyText = trim(raw.slice(idx + sep.length));
-            if (quotedText && replyText) {
-                return { quotedText: quotedText, replyText: replyText };
-            }
-        }
-        return null;
-    }
-
-    function stripInlineQuoteFromBubbleFields(b) {
-        if (!b) return b;
-        var fmt = global.MiyaChatOnlineFormat;
-        var reQuote = fmt && fmt.RE_QUOTE ? fmt.RE_QUOTE : /^引用[-－—]\s*(.+)$/;
-        var srcKey = b.type === 'voice' ? 'voiceText' : 'content';
-        var c = trim(b[srcKey] || b.content || '');
-        if (!c) return b;
-        var qo = c.match(reQuote);
-        if (!qo) return b;
-        var boundary = splitGroupQuoteReplyBoundary(qo[1]);
-        if (!boundary) return b;
-        var next = Object.assign({}, b, {
-            quoteRef: Object.assign({}, b.quoteRef || { dir: 'in' }, {
-                text: trim(boundary.quotedText).slice(0, 200)
-            })
-        });
-        if (b.type === 'voice') {
-            next.voiceText = trim(boundary.replyText);
-            next.content = '语音-' + next.voiceText;
-        } else {
-            next.content = trim(boundary.replyText);
-        }
-        return next;
-    }
-
     function parseGroupOutputLines(lines, members, store, groupChatId, catalog, profile, options) {
         var fmt = global.MiyaChatOnlineFormat;
         var opts = options && typeof options === 'object' ? options : {};
@@ -1491,7 +1449,6 @@
 
         function pushGroupBubble(b, speakerId) {
             if (!b) return;
-            b = stripInlineQuoteFromBubbleFields(b);
             var sid = trim(speakerId || b.senderContactId || lastSpeakerId);
             var row = Object.assign({}, b, {
                 role: 'assistant',

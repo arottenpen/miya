@@ -3,11 +3,14 @@
 
     var BANNER_SLOT_MS = 2600;
     var BANNER_LAST_HOLD_MS = 2000;
+    var SYSTEM_NOTIFICATION_MERGE_WINDOW_MS = 30000;
     var bannerQueue = [];
     var bannerBusy = false;
     var bannerHideTimer = null;
     var bannerRoot = null;
     var bannerCard = null;
+    var systemNotificationStateByChat = Object.create(null);
+    var systemNotificationQueueByChat = Object.create(null);
 
     function esc(s) {
         return String(s || '')
@@ -568,6 +571,62 @@
             .catch(function () {});
     }
 
+    function showMergedSystemNotification(chatId, title, body, icon, messageCount) {
+        if (!body || !messageCount || typeof global.miyaShowSystemNotification !== 'function') return;
+        var key = String(chatId);
+        var run = function () {
+            var now = Date.now();
+            var previous = systemNotificationStateByChat[key];
+            var count =
+                previous && now - previous.lastMessageAt <= SYSTEM_NOTIFICATION_MERGE_WINDOW_MS
+                    ? previous.count + messageCount
+                    : messageCount;
+            var opts = {
+                body: '累计 ' + String(count) + ' 条新消息\n' + body,
+                tag: 'miya-ch-' + key,
+                data: { chatId: chatId, kind: 'chat' }
+            };
+            if (icon && !/^data:/i.test(icon)) opts.icon = icon;
+
+            var created;
+            try {
+                created = global.miyaShowSystemNotification(title, opts);
+            } catch (err) {
+                console.warn('[MiyaChatNotify]', err);
+                return;
+            }
+            return Promise.resolve(created)
+                .then(function (n) {
+                    if (!n) return;
+                    systemNotificationStateByChat[key] = {
+                        count: count,
+                        lastMessageAt: Date.now()
+                    };
+                    if (n._viaSw) return;
+                    n.onclick = function () {
+                        try {
+                            window.focus();
+                        } catch (e) {}
+                        n.close();
+                        openChat(chatId);
+                    };
+                })
+                .catch(function (err) {
+                    console.warn('[MiyaChatNotify]', err);
+                });
+        };
+        var previous = systemNotificationQueueByChat[key] || Promise.resolve();
+        var next = previous.then(run, run);
+        systemNotificationQueueByChat[key] = next.then(
+            function (value) {
+                return value;
+            },
+            function (err) {
+                console.warn('[MiyaChatNotify]', err);
+            }
+        );
+    }
+
     function notifyAssistantMessages(chatId, msgs, meta) {
         if (!chatId || !Array.isArray(msgs) || !msgs.length) return;
         meta = meta && typeof meta === 'object' ? meta : {};
@@ -596,34 +655,23 @@
             if (!visibleGroupSys.length) return;
             var groupTitle = groupDisplayTitle(chat);
             var groupFallbackIcon = groupIcon(store, chat);
-            visibleGroupSys.forEach(function (m, i) {
-                var item = buildGroupBannerItem(store, chat, m, groupTitle, groupFallbackIcon, '');
-                if (!item || !item.body) return;
-                var opts = {
-                    body: item.body,
-                    tag: 'miya-ch-' + chatId + '-' + String(m.id || i) + '-' + String(m.createdAt || Date.now()),
-                    data: { chatId: chatId, kind: 'chat' }
-                };
-                if (item.icon && !/^data:/i.test(item.icon)) opts.icon = item.icon;
-                var show =
-                    global.miyaShowSystemNotification
-                        ? global.miyaShowSystemNotification(item.title, opts)
-                        : Promise.resolve(null);
-                show
-                    .then(function (n) {
-                        if (!n || n._viaSw) return;
-                        n.onclick = function () {
-                            try {
-                                window.focus();
-                            } catch (e) {}
-                            n.close();
-                            openChat(chatId);
-                        };
-                    })
-                    .catch(function (err) {
-                        console.warn('[MiyaChatNotify]', err);
-                    });
-            });
+            var latestGroupMessage = visibleGroupSys[visibleGroupSys.length - 1];
+            var latestGroupItem = buildGroupBannerItem(
+                store,
+                chat,
+                latestGroupMessage,
+                groupTitle,
+                groupFallbackIcon,
+                ''
+            );
+            if (!latestGroupItem || !latestGroupItem.body) return;
+            showMergedSystemNotification(
+                chatId,
+                latestGroupItem.title,
+                latestGroupItem.body,
+                latestGroupItem.icon,
+                visibleGroupSys.length
+            );
             return;
         }
         var contact = store.findContact(chat.contactId);
@@ -631,34 +679,14 @@
         var title = displayName(contact, chat);
         if (!visible.length) return;
         var icon = contactIcon(contact);
-        visible.forEach(function (m, i) {
-            var body = previewOneMessage(m);
-            if (!body) return;
-            var opts = {
-                body: body,
-                tag: 'miya-ch-' + chatId + '-' + String(m.id || i) + '-' + String(m.createdAt || Date.now()),
-                data: { chatId: chatId, kind: 'chat' }
-            };
-            if (icon && !/^data:/i.test(icon)) opts.icon = icon;
-            var show =
-                global.miyaShowSystemNotification
-                    ? global.miyaShowSystemNotification(title, opts)
-                    : Promise.resolve(null);
-            show
-                .then(function (n) {
-                    if (!n || n._viaSw) return;
-                    n.onclick = function () {
-                        try {
-                            window.focus();
-                        } catch (e) {}
-                        n.close();
-                        openChat(chatId);
-                    };
-                })
-                .catch(function (err) {
-                    console.warn('[MiyaChatNotify]', err);
-                });
-        });
+        var latestMessage = visible[visible.length - 1];
+        showMergedSystemNotification(
+            chatId,
+            title,
+            previewOneMessage(latestMessage),
+            icon,
+            visible.length
+        );
     }
 
     function handleServiceWorkerNotifyClick(data) {

@@ -70,34 +70,6 @@
         return s;
     }
 
-    /** 从右向左找分隔符，拆成「摘抄 + 回复」（摘抄内可含同类符号；分隔符按数组顺序优先匹配） */
-    function splitAtLastSeparator(raw, separators) {
-        var s = trim(raw);
-        if (!s) return null;
-        var i;
-        for (i = 0; i < separators.length; i++) {
-            var sep = separators[i];
-            var idx = s.lastIndexOf(sep);
-            if (idx <= 0) continue;
-            var quotedText = trim(s.slice(0, idx));
-            var replyText = trim(s.slice(idx + sep.length));
-            if (quotedText && replyText) return { quotedText: quotedText, replyText: replyText };
-        }
-        return null;
-    }
-
-    /** 仅从摘抄与首条回复之间找分界（固定分隔符：冒号、破折号、竖线、分号等） */
-    function splitQuoteReplyBoundary(body) {
-        var raw = trim(body);
-        if (!raw) return null;
-        var result = splitAtLastSeparator(raw, ['：', ':']);
-        if (result) return result;
-        result = splitAtLastSeparator(raw, ['——', '—', '–', '→', '=>', '->', '｜', '|', '；', ';']);
-        return result || null;
-    }
-
-    /** 回复段起始的类型前缀（用于从引用行拆出「摘抄 + 回复」） */
-
     /** 引用摘抄若为「语音-内容」，展示/匹配时剥掉前缀，保留原文供 msgType 判断 */
     function normalizeQuotedSourceText(text) {
         var t = normalizeQuoteText(text);
@@ -190,34 +162,6 @@
         return ['语音-' + trim(tail[1]), trim(tail[2])];
     }
 
-    /** 引用行正文拆成「被引内容 + 回复段」（摘抄内可含 语音- 等，不误拆） */
-    function splitQuoteBodyFromReply(quoteBody) {
-        var body = trim(quoteBody);
-        if (!body) return null;
-        var boundary = splitQuoteReplyBoundary(body);
-        if (boundary) return boundary;
-        var voiceQuoted = body.match(/^语音[-－—]\s*(.+)$/);
-        if (voiceQuoted) {
-            var voiceInner = trim(voiceQuoted[1]);
-            var voiceTail = voiceInner.match(/^(.+?)\s+(?!(?:引用|语音|表情包|图片|位置|转账|外卖|送礼|旁(?:白)?)\s*[-－—])(.+)$/);
-            if (voiceTail && trim(voiceTail[2])) {
-                return {
-                    quotedText: '语音-' + trim(voiceTail[1]),
-                    replyText: trim(voiceTail[2])
-                };
-            }
-            return { quotedText: body, replyText: '' };
-        }
-        var typedReply = body.match(/^(.+?)\s+(?=(?:语音|表情包|图片|位置|转账|外卖|送礼|旁(?:白)?)\s*[-－—])/);
-        if (typedReply) {
-            return {
-                quotedText: trim(typedReply[1]),
-                replyText: trim(body.slice(typedReply[1].length))
-            };
-        }
-        return null;
-    }
-
     function splitNonQuoteCollapsedSegments(raw) {
         var hits = raw.match(
             /(?:引用|语音|旁(?:白)?|表情包|图片|位置|转账|转账回执|外卖|送礼|换头像|给用户换头像|发起语音通话|发起视频通话)\s*[-－—：:]/g
@@ -232,95 +176,6 @@
             });
         });
         return out.length ? out : [raw];
-    }
-
-    /** 引用行拆出后的回复段：仅按换行拆成多条气泡（一行一气泡） */
-    function splitQuotedReplyLines(text) {
-        var raw = trim(text);
-        if (!raw) return [];
-        if (raw.indexOf('\n') >= 0) {
-            return raw
-                .split(/\n/)
-                .map(trim)
-                .filter(Boolean);
-        }
-        return [raw];
-    }
-
-    function stripLineForQuoteCompare(line) {
-        return stripApiTimelinePrefix(trim(line)).replace(/\s*⧗\s*$/g, '').trim();
-    }
-
-    /** 把「引用-摘抄 回复…」单行展开为多行，并跳过模型重复输出的后续相同行 */
-    function expandArrQuoteLines(lines) {
-        var arr = Array.isArray(lines) ? lines : [];
-        var out = [];
-        var i = 0;
-        while (i < arr.length) {
-            var line = arr[i];
-            var raw = stripLineForQuoteCompare(line);
-            var qo = raw.match(RE_QUOTE);
-            if (qo && qo[1] != null) {
-                var boundary = splitQuoteReplyBoundary(qo[1]);
-                if (boundary) {
-                    var replyParts = splitQuotedReplyLines(boundary.replyText);
-                    out.push('引用-' + boundary.quotedText);
-                    replyParts.forEach(function (part) {
-                        out.push(part);
-                    });
-                    var skip = 0;
-                    while (i + 1 + skip < arr.length && skip < replyParts.length) {
-                        if (stripLineForQuoteCompare(arr[i + 1 + skip]) === trim(replyParts[skip])) {
-                            skip++;
-                        } else {
-                            break;
-                        }
-                    }
-                    if (skip >= replyParts.length && skip > 0) {
-                        i += 1 + skip;
-                        continue;
-                    }
-                    i++;
-                    continue;
-                }
-            }
-            out.push(line);
-            i++;
-        }
-        return out;
-    }
-
-    /** @deprecated 展示层兼容；解析请用 splitQuoteReplyBoundary + splitQuotedReplyLines */
-    function splitInlineQuoteSuffix(body) {
-        return splitQuoteReplyBoundary(body);
-    }
-
-    /** 正文为省略号占位时，尝试从 quoteRef 摘抄里拆出真实回复 */
-    function recoverQuoteReplyFields(text, quoteRef) {
-        if (!quoteRef || quoteRef.text == null) {
-            return { text: text, quoteRef: quoteRef };
-        }
-        var bodyText = trim(text);
-        var qrText = trim(quoteRef.text);
-        if (!qrText) return { text: text, quoteRef: quoteRef };
-        var needRecover =
-            !bodyText ||
-            isQuoteParsePlaceholderContent(bodyText) ||
-            bodyText === qrText;
-        if (!needRecover) return { text: text, quoteRef: quoteRef };
-        var recovered = splitQuoteReplyBoundary(qrText);
-        if (!recovered) return { text: text, quoteRef: quoteRef };
-        return {
-            text: trim(recovered.replyText),
-            quoteRef: Object.assign({}, quoteRef, {
-                text: normalizeQuoteText(recovered.quotedText)
-            })
-        };
-    }
-
-    function isQuoteParsePlaceholderContent(text) {
-        var t = trim(text);
-        return t === '…' || t === '...' || t === '⋯';
     }
 
     function pushCatalogItems(packs, out, seen) {
@@ -1171,13 +1026,6 @@
                 .filter(Boolean);
         }
         if (RE_QUOTE.test(raw)) {
-            var qo = raw.match(RE_QUOTE);
-            var quoteSplit = qo && qo[1] != null ? splitQuoteBodyFromReply(qo[1]) : null;
-            if (quoteSplit && trim(quoteSplit.replyText)) {
-                var quotedLine = '引用-' + trim(quoteSplit.quotedText);
-                var replyLines = splitNonQuoteCollapsedSegments(trim(quoteSplit.replyText));
-                return [quotedLine].concat(replyLines);
-            }
             return [raw];
         }
         return splitNonQuoteCollapsedSegments(raw);
@@ -1325,7 +1173,7 @@
             '顺序：<thinking>…</thinking> → 正文（每行一条气泡，必须换行）→ <miyavoice>…</miyavoice>。',
             '用户只能看到 </thinking> 之后、<miyavoice> 之前的正文；思维链/心声/标记不得泄漏到正文。',
             '正文只输出一遍：禁止先写 [正文] 草稿再复读相同内容；禁止输出 [/thinking] 或心声字段行。',
-            countHint + '；引用时「引用-摘抄」独占一行，每条回复各占一行；「 / 」为用户连发消息的分隔符，引用时一次只引其中一条。',
+            countHint + '；引用时「引用-摘抄」独占一行（摘抄内的冒号等自然标点仍属于原文），回复必须从下一行开始且每条各占一行；「 / 」为用户连发消息的分隔符，引用时一次只引其中一条。',
             '真人聊天感：可跳跃、可断句、可转话题；勿复读近几轮话题/描写/动作；emoji/颜文字/标点须贴合人设情绪。',
             '发出前自检：① 正文无重复行 ② 一行一气泡 ③ 无结构标记 ④ 心声仅在 <miyavoice> 内 ⑤ 未复读近期话题与动作套路。'
         ];
@@ -1412,7 +1260,7 @@
         /^(?:引用|语音|图片|位置|转账|转账回执|外卖|送礼|情诗|旁(?:白)?|发起语音通话|发起视频通话|【发朋友圈)[-－—]/;
     var RE_RT_HEART_VOICE =
         /^(?:好感度|欲望值|行为动作|角色心声)\s*[-－—：:]/;
-    var RE_RT_META_TAG = /^<\/?(?:thinking|miyavoice|miyanextpush|think|redacted_thinking|reasoning)>|\[?\/?(?:thinking|think|miyavoice|miyanextpush|heartvoice|正文|主体|回复)\]?$|【?\/?(?:thinking|正文|主体)】?$/i;
+    var RE_RT_META_TAG = /^(?:<\/?(?:thinking|miyavoice|miyanextpush|think|redacted_thinking|reasoning)>|\[?\/?(?:thinking|think|miyavoice|miyanextpush|heartvoice|正文|主体|回复)\]?|【?\/?(?:thinking|正文|主体)】?)$/i;
 
     /** 模型泄漏的结构标记行（[正文]、[/thinking] 等），不应进入聊天气泡 */
     function isStructuralLeakLine(line) {
@@ -1790,7 +1638,7 @@
             '用户界面只显示 </thinking> 与 <miyavoice> 之间的正文；正文只输出一遍，禁止先写草稿再原样复读第二轮。',
             countHint + '；一个换行 = 一条气泡，禁止多条挤在同一行。',
             '',
-            '1、当你想引用用户的某条消息，必须先单独输出一行，格式为：引用-用户的该条消息原话（只写原话摘抄，不要加【】或其它括号包裹；一次只能引用一条用户消息，禁止把「 / 」分隔符两侧或多条用户发言拼进同一行引用；禁止在同一行接回复）。',
+            '1、当你想引用用户的某条消息，必须先单独输出一行，格式为：引用-用户的该条消息原话（只写原话摘抄，不要加【】或其它括号包裹；一次只能引用一条用户消息，禁止把「 / 」分隔符两侧或多条用户发言拼进同一行引用；引用内容可包含任意全角/半角冒号及其它自然标点，这些标点都属于原话，绝不是引用与回复的分隔符；禁止在同一行接回复）。',
             '2、引用行的下一行再写你对这句话的第一条回复；若还有第二、第三条回复，必须继续各占一行；每条回复行直接写正文，行首不要写「引用-」。',
             '3、你想发语音时，必须单独输出一行，格式为：语音-语音内容的文字转写（该行只写语音，不要和普通文字写在同一行）。',
             '4、你想发表情包时，必须单独输出一行，格式为：表情包-表情包名称（名称只能从上文「表情包可用列表」里原样复制，禁止捏造；该行只发表情包，不要和文字写在同一行；根据人设决定使用表情包的频率）。',
@@ -1871,7 +1719,7 @@
             ruleNum += 1;
         }
         var formatExampleBody = [
-            '引用-在干嘛呢',
+            '引用-你刚才说：在干嘛呢？',
             '上班呢',
             '你呢'
         ];
@@ -2051,40 +1899,40 @@
         var pending = pendingQuote != null ? trim(pendingQuote) : null;
 
         if (!raw) {
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
 
         if (/^引用[-－—]\s*$/.test(raw)) {
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
 
         if (isStructuralLeakLine(raw)) {
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
         if (RE_RT_HEART_VOICE.test(raw)) {
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
 
         if (isAvatarSwapCommandLine(raw)) {
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
 
         var trLine = raw.match(RE_TRANSLATION);
         if (trLine) {
             return {
                 fields: null,
-                pendingQuote: pending,
+                pendingQuote: null,
                 translationZh: trim(trLine[1])
             };
         }
 
         var roleCall = isRoleCallLineText(raw);
         if (roleCall) {
-            return { fields: null, pendingQuote: pending, roleCall: roleCall };
+            return { fields: null, pendingQuote: null, roleCall: roleCall };
         }
 
         if (RE_NARRATION.test(raw)) {
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
 
         var recallLine = raw.match(RE_RECALL);
@@ -2094,7 +1942,7 @@
                     type: 'recall',
                     recallTarget: trim(recallLine[1])
                 },
-                pendingQuote: pending
+                pendingQuote: null
             };
         }
 
@@ -2102,34 +1950,7 @@
         if (qo) {
             var quoteBody = trim(qo[1]);
             if (!quoteBody) {
-                return { fields: null, pendingQuote: pending };
-            }
-            var boundary = splitQuoteReplyBoundary(quoteBody);
-            if (!boundary) {
-                boundary = splitQuoteBodyFromReply(quoteBody);
-            }
-            if (boundary) {
-                var quotedOnly = normalizeQuotedSourceText(boundary.quotedText);
-                var replyRaw = trim(boundary.replyText);
-                if (replyRaw) {
-                    var nested = parseRoleOutputLine(replyRaw, catalog, quotedOnly);
-                    if (nested.fields) {
-                        if (nested.fields.quoteRef == null && quotedOnly) {
-                            nested.fields.quoteRef = buildQuoteRefFromPending(boundary.quotedText);
-                        }
-                        return { fields: nested.fields, pendingQuote: nested.pendingQuote };
-                    }
-                    var replyParts = splitQuotedReplyLines(boundary.replyText);
-                    if (replyParts.length > 1) {
-                        var first = parseRoleOutputLine(replyParts[0], catalog, quotedOnly);
-                        if (first.fields) {
-                            if (first.fields.quoteRef == null && quotedOnly) {
-                                first.fields.quoteRef = buildQuoteRefFromPending(boundary.quotedText);
-                            }
-                            return { fields: first.fields, pendingQuote: first.pendingQuote };
-                        }
-                    }
-                }
+                return { fields: null, pendingQuote: null };
             }
             return {
                 fields: null,
@@ -2141,7 +1962,7 @@
         if (voice) {
             var vt = stripOrphanMarkdownEmphasis(voice[1]);
             if (pending && isQuoteEchoVoiceLine(pending, vt)) {
-                return { fields: null, pendingQuote: pending };
+                return { fields: null, pendingQuote: null };
             }
             var vf = {
                 type: 'voice',
@@ -2157,11 +1978,14 @@
 
         var stk = raw.match(RE_STICKER);
         if (stk) {
+            if (isUnknownStickerLine(raw, catalog)) {
+                return { fields: null, pendingQuote: null };
+            }
             var sf = buildStickerFields(stk[1], catalog, pending);
             if (sf) {
                 return { fields: sf, pendingQuote: null };
             }
-            return { fields: null, pendingQuote: pending };
+            return { fields: null, pendingQuote: null };
         }
 
         var img = raw.match(RE_IMAGE);
@@ -2199,10 +2023,11 @@
                 }
                 return { fields: lmf, pendingQuote: null };
             }
+            return { fields: null, pendingQuote: null };
         }
 
         if (RE_TRANSFER_RECEIPT.test(raw)) {
-            return { fields: null, pendingQuote: pending, receiptLine: true };
+            return { fields: null, pendingQuote: null, receiptLine: true };
         }
 
         var trLine = raw.match(RE_TRANSFER);
@@ -2226,6 +2051,7 @@
                 }
                 return { fields: tmf, pendingQuote: null };
             }
+            return { fields: null, pendingQuote: null };
         }
 
         var toLine = raw.match(RE_TAKEOUT);
@@ -2250,6 +2076,7 @@
                 }
                 return { fields: tof, pendingQuote: null };
             }
+            return { fields: null, pendingQuote: null };
         }
 
         var giftLine = raw.match(RE_GIFT);
@@ -2282,6 +2109,7 @@
                 }
                 return { fields: gf, pendingQuote: null };
             }
+            return { fields: null, pendingQuote: null };
         }
 
         var poemLine = raw.match(RE_LOVE_POEM);
@@ -2299,6 +2127,7 @@
                 }
                 return { fields: pf, pendingQuote: null };
             }
+            return { fields: null, pendingQuote: null };
         }
 
         var grpLine = raw.match(RE_GROUP_RED_PACKET);
@@ -2326,6 +2155,7 @@
                 }
                 return { fields: grpf, pendingQuote: null };
             }
+            return { fields: null, pendingQuote: null };
         }
 
         var tf = { type: 'text', content: stripOrphanMarkdownEmphasis(raw) };
@@ -2387,9 +2217,13 @@
 
             var expanded = collapseDuplicateBubbleLines(
                 filterStructuralLeakLines(
-                    expandArrQuoteLines(sanitizeRoleOutputLines(expandCollapsedOutputLines([parseLine])))
+                    sanitizeRoleOutputLines(expandCollapsedOutputLines([parseLine]))
                 )
             );
+            if (!expanded.length) {
+                out.push({ line: '', createdAt: createdAt, quoteBoundary: true });
+                return;
+            }
             expanded.forEach(function (expandedLine, index) {
                 var segmentCreatedAt = createdAt;
                 if (index > 0 && hasAllocator) {
@@ -2493,14 +2327,15 @@
         var arr = expandTimedRoleOutputCandidates(lines, opts);
         var out = [];
         var pending = null;
-        var pendingCreatedAt = 0;
         var pendingRoleCall = null;
         arr.forEach(function (candidate) {
             var createdAt = Number(candidate && candidate.createdAt) || 0;
+            if (candidate && candidate.quoteBoundary) {
+                pending = null;
+                return;
+            }
             var r = parseRoleOutputLine(candidate && candidate.line, catalog, pending);
             pending = r.pendingQuote;
-            if (pending) pendingCreatedAt = createdAt || pendingCreatedAt;
-            else pendingCreatedAt = 0;
             if (r.roleCall) pendingRoleCall = r.roleCall;
             if (r.translationZh && out.length) {
                 var last = out[out.length - 1];
@@ -2517,23 +2352,6 @@
                 out.push(r.fields);
             }
         });
-        if (pending) {
-            var pendingStk = pending.match(RE_STICKER);
-            if (pendingStk) {
-                var pendingSf = buildStickerFields(pendingStk[1], catalog, null);
-                if (pendingSf) {
-                    if (pendingCreatedAt) pendingSf.createdAt = pendingCreatedAt;
-                    out.push(pendingSf);
-                    pending = null;
-                }
-            } else {
-                out.push({
-                    type: 'text',
-                    content: stripOrphanMarkdownEmphasis(pending),
-                    createdAt: pendingCreatedAt || undefined
-                });
-            }
-        }
         return { bubbles: dedupeParsedRoleBubbles(out), pendingRoleCall: pendingRoleCall };
     }
 
@@ -2588,15 +2406,21 @@
         var outLines = [];
         var narrationOps = [];
         var bubbleIndex = -1;
+        var pendingQuote = false;
         src.forEach(function (line) {
             var txt = trim(line);
             if (!txt) return;
             var body = narrationEnabled ? parseNarrationLineToBody(txt) : '';
             if (body) {
                 narrationOps.push({ text: body, afterBubbleIndex: bubbleIndex });
+                if (pendingQuote) {
+                    outLines.push(line);
+                    pendingQuote = false;
+                }
                 return;
             }
             outLines.push(line);
+            pendingQuote = RE_QUOTE.test(stripApiTimelinePrefix(txt));
             bubbleIndex += 1;
         });
         return { lines: outLines, narrationOps: narrationOps };
@@ -2803,40 +2627,15 @@
             }
         }
         var quoteRef = m.quoteRef || null;
-        var recoveredFields = recoverQuoteReplyFields(text, quoteRef);
-        text = recoveredFields.text;
-        quoteRef = recoveredFields.quoteRef;
-
-        if (quoteRef && quoteRef.text && text) {
-            var inlineQo = text.match(RE_QUOTE);
-            if (inlineQo) {
-                var inlineBoundary = splitQuoteReplyBoundary(inlineQo[1]);
-                if (inlineBoundary) {
-                    text = trim(inlineBoundary.replyText);
-                    quoteRef = Object.assign({}, quoteRef, {
-                        text: normalizeQuoteText(inlineBoundary.quotedText)
-                    });
-                }
-            }
-        }
 
         if (!quoteRef && text) {
             var qo = text.match(RE_QUOTE);
             if (qo) {
-                var inlineFromContent = splitQuoteReplyBoundary(qo[1]);
-                if (inlineFromContent) {
-                    quoteRef = {
-                        dir: m.role === 'user' ? 'in' : 'out',
-                        text: normalizeQuoteText(inlineFromContent.quotedText)
-                    };
-                    text = trim(inlineFromContent.replyText);
-                } else {
-                    quoteRef = {
-                        dir: m.role === 'user' ? 'in' : 'out',
-                        text: normalizeQuoteText(qo[1])
-                    };
-                    text = '';
-                }
+                quoteRef = {
+                    dir: m.role === 'user' ? 'in' : 'out',
+                    text: normalizeQuoteText(qo[1])
+                };
+                text = '';
             }
         }
 

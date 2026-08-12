@@ -5291,12 +5291,6 @@
     if (input) {
       var inputHeightRaf = 0;
       var focusKbTimers = [];
-      input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          handleSend();
-        }
-      });
       input.addEventListener('input', function () {
         if (inputHeightRaf) cancelAnimationFrame(inputHeightRaf);
         inputHeightRaf = requestAnimationFrame(function () {

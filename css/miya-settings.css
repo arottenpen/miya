@@ -969,6 +969,9 @@
 .miya-settings-app .ins-select,
 .miya-settings-app .ins-textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: rgba(0, 0, 0, 0.02);
   border: 1px solid var(--st-border);
   border-radius: 16px;
@@ -994,6 +997,19 @@
   border-radius: 14px;
   border: 1px solid var(--st-border);
   background: rgba(255, 255, 255, 0.8);
+}
+
+.miya-settings-app .ins-inline-field {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.miya-settings-app .ins-inline-field .ins-text-input {
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
 }
 
 .miya-settings-app .ins-inline-field .ins-select {
