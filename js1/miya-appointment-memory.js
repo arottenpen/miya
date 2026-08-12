@@ -57,9 +57,19 @@
         }
     }
 
-    function formatCrossLine(role, contact, profile, body, ts) {
-        var stamp = formatCrossTime(ts);
+    function crossTimeStampEnabled(chatSettings) {
+        var aw = global.MiyaChatAwareness;
+        if (aw && typeof aw.isTimeStampEnabled === 'function') {
+            return aw.isTimeStampEnabled(chatSettings);
+        }
+        var ta = chatSettings && chatSettings.timeAwareness;
+        return !!(ta && ta.enabled && ta.mode === 'real');
+    }
+
+    function formatCrossLine(role, contact, profile, body, ts, chatSettings) {
         var who = formatWho(role, contact, profile);
+        var showTime = crossTimeStampEnabled(chatSettings) && role !== 'assistant';
+        var stamp = showTime ? formatCrossTime(ts) : '';
         var prefix = stamp ? '〔' + stamp + '·线下〕' : '〔线下〕';
         return prefix + who + '：' + body;
     }
@@ -292,12 +302,13 @@
         return blocks;
     }
 
-    function collectOfflineSlotsForOnline(chatId, contact, profile, memoryCount) {
+    function collectOfflineSlotsForOnline(chatId, contact, profile, memoryCount, chatSettings) {
         var aps = apStore();
         if (!aps) return { slotItems: [] };
         var contactId = resolveContactIdFromInput(chatId, contact);
         var sessions = aps.exportForMemory(chatId, contactId);
         var limit = clampInt(memoryCount, 1, 500, 40);
+        var showTime = crossTimeStampEnabled(chatSettings);
         var items = [];
         sessions.forEach(function (sess) {
             var ranges = offlineSummaryRanges(sess);
@@ -313,7 +324,7 @@
                     kind: 'message',
                     ts: ts,
                     role: m.role,
-                    content: formatCrossLine(m.role, contact, profile, body, ts),
+                    content: formatCrossLine(m.role, contact, profile, body, ts, chatSettings),
                     sessionId: sess.id,
                     orderKey: ts || idx
                 });
@@ -322,13 +333,14 @@
                 var body = String((row && row.content) || '').trim();
                 if (!body) return;
                 var ts = pickTs(row.createdAt) || pickTs(sess.createdAt);
+                var stamp = showTime ? formatCrossTime(ts) : '';
                 items.push({
                     channel: 'offline',
                     kind: 'summary',
                     ts: ts,
                     role: 'system',
                     content:
-                        (formatCrossTime(ts) ? '〔' + formatCrossTime(ts) + '·线下总结〕' : '〔线下总结〕') +
+                        (stamp ? '〔' + stamp + '·线下总结〕' : '〔线下总结〕') +
                         '\n' +
                         body,
                     sessionId: sess.id,
@@ -342,7 +354,7 @@
     function collectOfflineCrossForAppointment(chatId, contact, profile, settings, memoryCount) {
         var limit = clampInt(memoryCount, 1, 500, 40);
         var online = collectOnlineSlots(chatId, contact, profile, settings, memoryCount);
-        var offline = collectOfflineSlotsForOnline(chatId, contact, profile, memoryCount);
+        var offline = collectOfflineSlotsForOnline(chatId, contact, profile, memoryCount, settings);
         var offlineMsgs = (offline.slotItems || []).filter(function (it) {
             return it && it.kind === 'message';
         });
@@ -473,7 +485,7 @@
         buildOnlineCrossMemory: function (chatId, contact, profile, settings) {
             var memoryCount =
                 settings && settings.memoryCount ? clampInt(settings.memoryCount, 1, 500, 40) : 40;
-            var pack = collectOfflineSlotsForOnline(chatId, contact, profile, memoryCount);
+            var pack = collectOfflineSlotsForOnline(chatId, contact, profile, memoryCount, settings);
             return {
                 systemBlock: buildCrossMemorySystemBlock(pack.slotItems),
                 slotItems: pack.slotItems
