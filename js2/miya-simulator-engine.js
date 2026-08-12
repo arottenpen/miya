@@ -552,7 +552,7 @@
     var avoid = (ctx.initialSkills || []).map(function (s) { return s.name; }).join('、');
     var task =
       mode === 'regen'
-        ? '【任务】根据剧本设定，**重新生成** ' + count + ' 个全新初始技能（仅配置用，level=1），名称与旧表完全不同。'
+        ? '【任务】根据剧本设定，生成 ' + count + ' 个全新初始技能（仅配置用，level=1），名称与旧表完全不同。'
         : mode === 'new'
           ? '【任务】在已有初始技能基础上，再创作 ' + count + ' 个新技能，不要重名。'
           : '【任务】为剧本配置生成 ' + count + ' 个初始技能（仅 name、desc），符合世界观。';
@@ -695,7 +695,7 @@
     var avoid = (ctx.existingSkills || []).map(function (s) { return s.name; }).join('、');
     var task =
       mode === 'regen'
-        ? '【任务】根据剧本与角色，**重新生成** ' + count + ' 个全新一级技能（level=1），名称与介绍与旧技能完全不同。'
+        ? '【任务】根据剧本与角色，生成 ' + count + ' 个全新一级技能（level=1），名称与介绍与旧技能完全不同。'
         : mode === 'new'
           ? '【任务】在已有技能基础上，再创作 ' + count + ' 个全新一级技能（level=1），不要与已有技能重名。'
           : '【任务】为角色生成 ' + count + ' 个初始一级技能（level=1），符合世界观与身份。';
@@ -901,7 +901,7 @@
     var existingThisTurn = (ctx.narrativeEventsThisRound || 0) + (opts.alreadyGenerated || 0);
     var head =
       (opts.regenerate
-        ? '【任务】**重新生成**第 ' + turn + ' 回合：流式输出 ' + batchCount + ' 条全新叙事事件（NDJSON 每行一条）。\n'
+        ? '【任务】生成第 ' + turn + ' 回合：流式输出 ' + batchCount + ' 条全新叙事事件（NDJSON 每行一条）。\n'
         : opts.continuation
           ? '【续写】第 ' + turn + ' 回合已生成 ' + existingThisTurn + ' 条，请再流式输出 ' + batchCount + ' 条**全新**事件（NDJSON 每行一条）。\n'
           : '【任务】为第 ' + turn + ' 回合流式输出 ' + batchCount + ' 条叙事事件（NDJSON 每行一条）。\n') +

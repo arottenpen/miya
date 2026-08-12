@@ -1572,45 +1572,6 @@
         ].join('\n');
     }
 
-    function buildRegenerateRoundInjectBlock(contact, opts) {
-        opts = opts && typeof opts === 'object' ? opts : {};
-        var roleName = trim((contact && contact.name) || '') || '角色';
-        var userRoundText = formatUserRoundLinesForRegenerate(
-            opts.history || [],
-            opts.chatSettings
-        );
-        var hvPreset = null;
-        var tplMod = global.MiyaChatHeartVoiceTemplates;
-        if (tplMod && typeof tplMod.resolvePresetForChat === 'function') {
-            hvPreset = tplMod.resolvePresetForChat(opts.chatSettings);
-        }
-        var regenForbid = hvPreset
-            ? '正文与心声均须根据当前对话全新撰写；禁止沿用已撤回轮次的正文或心声各字段内容。'
-            : '正文与心声均须根据当前对话全新撰写；禁止沿用已撤回轮次的正文、好感度、欲望值、行为动作或角色心声。';
-        var lines = [
-            '【重回·' + roleName + '】',
-            '用户已撤回并请求重新生成本轮回复。',
-            '须完整输出 <thinking> → 正文气泡 → <miyavoice> 三段，缺一不可。',
-            regenForbid
-        ];
-        if (userRoundText) {
-            lines.push(
-                '【本轮用户消息·须回复以下内容】',
-                '下列为用户在本轮发送的全部消息（含时间标记；更早轮次的用户发言仅作背景，不得当作本轮回复对象）：',
-                userRoundText,
-                '须仅针对以上消息重新生成回复；禁止回应更早轮次的用户发言；禁止复读已撤回的角色回复。'
-            );
-        } else {
-            lines.push(
-                '须根据上下文中最后一段连续用户消息（自最近一条角色回复之后）重新生成回复，勿回应更早轮次的用户发言。'
-            );
-        }
-        lines.push(
-            '若系统另行注入「上一轮心声」，仅指撤回轮次之前的快照；本轮 <miyavoice> 须在此基础上续写更新，不得复制已撤回内容。'
-        );
-        return lines.join('\n');
-    }
-
     function buildOnlineRules(opts) {
         opts = opts && typeof opts === 'object' ? opts : {};
         var roleName = trim(opts.roleName) || '角色';
@@ -3278,7 +3239,6 @@
         buildOnlineRules: buildOnlineRules,
         buildHeartVoiceRulesBlock: buildHeartVoiceRulesBlock,
         buildLastHeartVoiceInjectBlock: buildLastHeartVoiceInjectBlock,
-        buildRegenerateRoundInjectBlock: buildRegenerateRoundInjectBlock,
         collectTrailingUserRound: collectTrailingUserRound,
         formatUserRoundLinesForRegenerate: formatUserRoundLinesForRegenerate,
         formatHeartVoiceSnapshotLines: formatHeartVoiceSnapshotLines,

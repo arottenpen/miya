@@ -639,26 +639,15 @@
         );
     }
 
-    function buildRegenerateTailNudge() {
-        return (
-            '（【重回·生成】须严格按上文 system 中【重回】块所列「本轮用户消息」重新生成本轮回复；更早对话仅作背景，禁止回应其它轮次用户发言；' +
-            ONLINE_THREE_PART_TAIL +
-            '）'
-        );
-    }
-
     function appendManualActionTailNudge(apiMessages, opts, historyTailState, hasExtraUserText) {
         opts = opts && typeof opts === 'object' ? opts : {};
         if (!Array.isArray(apiMessages)) return;
         if (opts.isAutoPush || opts.isOffline || opts.isMomentsAuto || opts.isLifeLike) return;
         if (opts.callMode || opts.appointmentMode) return;
+        if (opts.isRegenerate) return;
         if (!opts.skipUserMessage || hasExtraUserText) return;
         var tail;
-        if (opts.isRegenerate) {
-            if (historyTailState === 'user_spoke_last') {
-                tail = buildRegenerateTailNudge();
-            }
-        } else if (historyTailState === 'assistant_spoke_last') {
+        if (historyTailState === 'assistant_spoke_last') {
             tail = buildManualContinueTailNudge();
         } else if (historyTailState === 'user_spoke_last') {
             tail = buildManualReplyToUserTailNudge();
@@ -1059,17 +1048,6 @@
                     userAvatarSwapEnabled: !!(s && s.dynamicAvatar && s.dynamicAvatar.userEnabled)
                 })
             );
-        }
-        if (
-            opts.isRegenerate &&
-            fmt &&
-            typeof fmt.buildRegenerateRoundInjectBlock === 'function'
-        ) {
-            var regenBlock = fmt.buildRegenerateRoundInjectBlock(contact, {
-                history: Array.isArray(opts.history) ? opts.history : [],
-                chatSettings: s
-            });
-            if (regenBlock) blocks.push(regenBlock);
         }
         if (
             !opts.callMode &&
