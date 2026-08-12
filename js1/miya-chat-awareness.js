@@ -876,6 +876,10 @@
     function stampMessageForApi(text, m, chatSettings, nowTs, prevTs) {
         var body = String(text || '').trim();
         if (!body || !isRealChatMessage(m)) return body;
+        /* 时间感知关闭时，不打时间戳 */
+        if (!isTimeStampEnabled(chatSettings)) return body;
+        /* 模型侧（assistant）消息不打时间戳，防止模型模仿上下文格式 */
+        if (m && m.role === 'assistant') return body;
         var prefix = buildMiyaApiTimelinePrefix(m && m.createdAt);
         if (!prefix) return body;
         if (m && m._apiTimelineStamped === true && body.slice(0, prefix.length) === prefix) {
