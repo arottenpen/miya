@@ -2710,7 +2710,7 @@
                         : String(m.content || '').trim();
                 if (!ut) return;
                 flushAssistant();
-                ut = applyOfflineMeetLabel(ut, m);
+                ut = applyOfflineMeetLabel(ut, m, chatSettings);
                 var stamped =
                     aw && typeof aw.stampMessageForApi === 'function'
                         ? aw.stampMessageForApi(ut, m, chatSettings)
@@ -2726,7 +2726,7 @@
                         : String(m.content || '').trim();
                 body = stripThinkingForApi(body);
                 if (!body) return;
-                body = applyOfflineMeetLabel(body, m);
+                body = applyOfflineMeetLabel(body, m, chatSettings);
                 pushAssistantLine(body, m);
             }
         });
@@ -2759,6 +2759,18 @@
             !aw ||
             typeof aw.buildConversationGapReminder !== 'function'
         ) {
+            return null;
+        }
+        /*
+         * 时间感知关闭时不生成这段提醒（间隔时长本身就是时间信息），与逐条时间戳同一判据。
+         * 在准备阶段拦截：不产生文本，也不产生去重 key，因此不会误写「已提醒」状态。
+         * 判据缺失时按关闭处理。单聊与群聊共用本函数，注入侧无需再过滤。
+         */
+        var gapSettings = typeof st.getChatSettings === 'function' ? st.getChatSettings(chatId) : null;
+        if (opts && opts.chatSettings && typeof opts.chatSettings === 'object') {
+            gapSettings = Object.assign({}, gapSettings || {}, opts.chatSettings);
+        }
+        if (typeof aw.isTimeStampEnabled !== 'function' || !aw.isTimeStampEnabled(gapSettings)) {
             return null;
         }
         var target = directUserMessage && directUserMessage.role === 'user' ? directUserMessage : null;
@@ -2816,32 +2828,46 @@
         });
     }
 
-    function applyOfflineMeetLabel(body, m) {
+    /*
+     * 〔线下〕表达场景而非时间，任何情况都保留；时间部分与逐条时间戳同一判据
+     * （MiyaChatAwareness.isTimeStampEnabled）：关闭时不出时间；assistant 侧不出时间，
+     * 防止模型模仿上下文格式自行编造时刻。取不到判据或设置时按关闭处理。
+     */
+    function applyOfflineMeetLabel(body, m, chatSettings) {
         var text = String(body || '').trim();
         if (!text || !m || !m.offlineMeet) return text;
+        var awLabel = global.MiyaChatAwareness;
+        var allowStamp =
+            !!(
+                awLabel &&
+                typeof awLabel.isTimeStampEnabled === 'function' &&
+                awLabel.isTimeStampEnabled(chatSettings)
+            ) && m.role !== 'assistant';
         var stamp = '';
-        try {
-            var ts = Number(m.createdAt);
-            if (Number.isFinite(ts) && ts > 0) {
-                stamp = new Date(ts).toLocaleString('zh-CN', {
-                    hour12: false,
-                    month: 'numeric',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            }
-        } catch (eStamp) {}
+        if (allowStamp) {
+            try {
+                var ts = Number(m.createdAt);
+                if (Number.isFinite(ts) && ts > 0) {
+                    stamp = new Date(ts).toLocaleString('zh-CN', {
+                        hour12: false,
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+            } catch (eStamp) {}
+        }
         return (stamp ? '〔' + stamp + '·线下〕' : '〔线下〕') + text;
     }
 
-    function formatOfflineMirrorForApiContext(m, fmtCtx) {
+    function formatOfflineMirrorForApiContext(m, fmtCtx, chatSettings) {
         if (!m || m.deleted) return '';
         var body =
             fmtCtx && typeof fmtCtx.formatMessageForApi === 'function'
                 ? fmtCtx.formatMessageForApi(m)
                 : String(m.content || '').trim();
-        return applyOfflineMeetLabel(body, m);
+        return applyOfflineMeetLabel(body, m, chatSettings);
     }
 
     function buildApiMessages(chatId, userText, opts) {
@@ -2915,7 +2941,7 @@
         var contextText =
             sliceContext
                 .map(function (m) {
-                    return formatOfflineMirrorForApiContext(m, fmtCtx);
+                    return formatOfflineMirrorForApiContext(m, fmtCtx, settings);
                 })
                 .filter(Boolean)
                 .join('\n') +
