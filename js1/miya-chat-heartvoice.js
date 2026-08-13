@@ -489,7 +489,7 @@
             '<div class="mc-hv__section mc-hv__section--action">' +
             '<div class="mc-hv__section-head">' +
             '<span class="mc-hv__section-no">01</span>' +
-            '<span class="mc-hv__section-title">行为动作</span>' +
+            '<span class="mc-hv__section-title">当前状态</span>' +
             '<span class="mc-hv__section-tag">Objective</span></div>' +
             '<div class="mc-hv__action-frame">' +
             '<div class="mc-hv__action-corner mc-hv__action-corner--tl"></div>' +

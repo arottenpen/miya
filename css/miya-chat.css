@@ -3663,7 +3663,7 @@ textarea.qq-sheet__input {
 
 .mc-hv__action-frame p {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.75;
   color: rgba(72, 72, 72, 0.72);
 }
@@ -3781,7 +3781,7 @@ html.is-ios .qq-room__input {
   .mc-hv__hist-item { padding: 8px 6px; }
   .mc-hv__hist-del { width: 24px; height: 24px; }
   .mc-hv__hist-del svg { width: 12px; height: 12px; }
-  .mc-hv__quote { font-size: 14px; padding: 14px 14px 14px 22px; }
+  .mc-hv__quote { font-size: 15px; padding: 14px 14px 14px 22px; }
 }
 
 /* ── 手帐表单 · 外卖 / 送礼 ── */

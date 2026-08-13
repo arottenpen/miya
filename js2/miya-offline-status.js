@@ -358,6 +358,7 @@
                 var legacyMap = {
                     好感度: parsed.extracted.affection != null ? String(parsed.extracted.affection) : '',
                     欲望值: parsed.extracted.desire != null ? String(parsed.extracted.desire) : '',
+                    当前状态: parsed.extracted.action || '',
                     行为动作: parsed.extracted.action || '',
                     角色心声: parsed.extracted.monologue || ''
                 };

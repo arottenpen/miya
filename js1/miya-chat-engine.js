@@ -1709,9 +1709,10 @@
     function parseHeartVoiceFieldLine(line, allowedNames) {
         var raw = stripHeartVoiceTagFragments(trimLine(line));
         if (!raw) return null;
+        /* 行为动作 = 当前状态的改名前旧标签，保留以解析旧聊天历史与旧输出 */
         var names = Array.isArray(allowedNames) && allowedNames.length
             ? allowedNames
-            : ['好感度', '欲望值', '行为动作', '角色心声'];
+            : ['好感度', '欲望值', '当前状态', '行为动作', '角色心声'];
         var i;
         for (i = 0; i < names.length; i++) {
             var label = String(names[i] || '').trim();
@@ -1865,7 +1866,7 @@
             if (!legacy) continue;
             if (legacy.key === '好感度') out.affection = clampHeartVoiceScore(legacy.value);
             else if (legacy.key === '欲望值') out.desire = clampHeartVoiceScore(legacy.value);
-            else if (legacy.key === '行为动作')
+            else if (legacy.key === '当前状态' || legacy.key === '行为动作')
                 out.action = clipHeartVoiceFieldValue(legacy.value || '', HEART_VOICE_LEGACY_LINE_MAX);
             else if (legacy.key === '角色心声')
                 out.monologue = clipHeartVoiceFieldValue(legacy.value || '', HEART_VOICE_LEGACY_LINE_MAX);
