@@ -2989,13 +2989,15 @@
       showMainList();
     });
 
-    // Android Chrome 全选输入框文本时会程序化横向滚动 overflow-x: hidden 的面板，
-    // 用户无手势可以滚回，这里在出现横向偏移时立即归零
-    app.querySelectorAll('.ins-vault-panel').forEach(function (p) {
-      p.addEventListener('scroll', function () {
-        if (p.scrollLeft !== 0) p.scrollLeft = 0;
-      }, { passive: true });
-    });
+    // Android Chrome 全选输入框文本时会沿祖先链程序化横向滚动 overflow-x: hidden
+    // 的容器（面板、根元素等均可能被滚歪且用户无手势可以滚回）。scroll 不冒泡，
+    // 用捕获阶段统一兜底：设置应用内不存在合法的横向滚动，出现偏移即归零
+    app.addEventListener('scroll', function (e) {
+      var t = e.target;
+      if (!t || t.nodeType !== 1 || t.scrollLeft === 0) return;
+      var ox = getComputedStyle(t).overflowX;
+      if (ox === 'hidden' || ox === 'clip') t.scrollLeft = 0;
+    }, { capture: true, passive: true });
 
     onClick('miya-st-clear-chat-app-beautify', function () {
       dialog({
