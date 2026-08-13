@@ -242,11 +242,13 @@
   function setApiConfig(next) {
     apiConfigCache = Object.assign({}, getApiConfig(), next || {});
     if (typeof global.miyaWriteLsJsonKey === 'function') {
-      global.miyaWriteLsJsonKey(API_CONFIG_KEY, apiConfigCache).catch(function () {
+      return global.miyaWriteLsJsonKey(API_CONFIG_KEY, apiConfigCache).catch(function () {
         saveJson(API_CONFIG_KEY, apiConfigCache);
+        return false;
       });
     } else {
       saveJson(API_CONFIG_KEY, apiConfigCache);
+      return Promise.resolve(true);
     }
   }
 
@@ -1927,17 +1929,18 @@
         toast('未找到该预设');
         return false;
       }
-      setApiConfig(pickPrimaryChatApiConfig(pr.config));
-      syncChatApiPanelForms();
-      var pick = $('miya-st-preset-pick');
-      if (pick) pick.value = label;
-      var nameInput = $('miya-st-preset-name');
-      if (nameInput) nameInput.value = label;
-      systemPrefs.apiFabActivePreset = label;
-      persistSystemPrefs();
-      refreshApiFabLists();
-      toast('已切换对话主 API「' + label + '」');
-      return true;
+      return Promise.resolve(setApiConfig(pickPrimaryChatApiConfig(pr.config))).then(function () {
+        syncChatApiPanelForms();
+        var pick = $('miya-st-preset-pick');
+        if (pick) pick.value = label;
+        var nameInput = $('miya-st-preset-name');
+        if (nameInput) nameInput.value = label;
+        systemPrefs.apiFabActivePreset = label;
+        persistSystemPrefs();
+        refreshApiFabLists();
+        toast('已切换对话主 API「' + label + '」');
+        return true;
+      });
     });
   }
 
