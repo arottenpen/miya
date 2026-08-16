@@ -304,6 +304,7 @@
       gender: '',
       birthday: '',
       persona: '',
+      conversationMode: 'roleplay',
       prioritySystemPrompt: '',
       avatar: ''
     };
@@ -316,6 +317,8 @@
     $('miya-ct-field-gender').value = data.gender || '';
     $('miya-ct-field-birthday').value = data.birthday || '';
     $('miya-ct-field-persona').value = data.persona || '';
+    var modeEl = $('miya-ct-field-conversation-mode');
+    if (modeEl) modeEl.value = data.conversationMode === 'native' ? 'native' : 'roleplay';
     $('miya-ct-field-priority-system-prompt').value = data.prioritySystemPrompt || '';
     fillGroupSelect(data.groupId || store.DEFAULT_GROUP_ID);
 
@@ -353,6 +356,7 @@
       gender: ($('miya-ct-field-gender').value || '').trim(),
       birthday: ($('miya-ct-field-birthday').value || '').trim(),
       persona: ($('miya-ct-field-persona').value || '').trim(),
+      conversationMode: (($('miya-ct-field-conversation-mode') || {}).value || 'roleplay') === 'native' ? 'native' : 'roleplay',
       prioritySystemPrompt: $('miya-ct-field-priority-system-prompt').value || '',
       avatar: draftAvatar || ''
     };

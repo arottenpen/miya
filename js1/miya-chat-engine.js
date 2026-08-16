@@ -579,6 +579,15 @@
     }
 
     function buildChatModeBlock(contact, profile) {
+        if (resolveConversationMode(contact) === 'native') {
+            return (
+                '【对话模式·本体对话】\n' +
+                '当前是 Miya 即时通讯前端中的模型对话，不要求你扮演联系人，也不要求把对话解释为现实中的人物关系。\n' +
+                '- 保持自然、清楚、适合聊天气泡阅读的表达；可使用分行、标点和少量 emoji，但不要主动编造生活经历或现实行为。\n' +
+                '- 用户身份、世界书、联系人最高优先级提示词和本轮明确任务仍然有效；仅按这些实际注入内容理解上下文。\n' +
+                '- 遵守下文的思维链、心声、消息格式与运转规则；不要自行输出未被要求的模拟功能。'
+            );
+        }
         return (
             '【对话模式·线上单聊】\n' +
             '你正在以「' +
@@ -592,6 +601,10 @@
             '- 【禁止混用群聊格式】正文禁止「角色名：」多角色格式；群聊摘录/记忆仅作剧情参考，不得把群聊输出格式带入本单聊\n' +
             '- 提示词顺序：全局 → 用户身份 → 关系 → 世界书 → 线上格式 → … → 联系人档案 → 思维链 → 运转规则（置末，紧挨生成前）'
         );
+    }
+
+    function resolveConversationMode(contact) {
+        return contact && String(contact.conversationMode || '').trim() === 'native' ? 'native' : 'roleplay';
     }
 
     function buildPrivateChatScopeFence() {
@@ -685,18 +698,23 @@
 
     function buildCallModeBlock(contact, profile, callKind) {
         var kindLabel = callKind === 'video' ? '视频' : '语音';
+        var nativeMode = resolveConversationMode(contact) === 'native';
         return (
             '【对话模式·实时' +
             kindLabel +
             '通话】\n' +
-            '你正在以「' +
+            (nativeMode
+                ? '当前请求会被前端渲染为一次模拟' + kindLabel + '通话界面，你无需扮演联系人或把它解释为现实通话。\n'
+                : '你正在以「' +
             String((contact && contact.name) || '对方') +
             '」的身份，与「' +
             String((profile && profile.name) || '用户') +
             '」进行实时' +
             kindLabel +
-            '通话。\n' +
-            '- 【重要】这是实时通话，不是微信文字聊天；你必须始终按通话情境反应。\n' +
+            '通话。\n') +
+            (nativeMode
+                ? '- 【重要】请配合模拟通话界面，只输出适合口头交流的对白；不要宣称通话在现实中发生。\n'
+                : '- 【重要】这是实时通话，不是微信文字聊天；你必须始终按通话情境反应。\n') +
             '- 语气口语化、有呼吸感；禁止表情包/语音条/图片/位置/转账等线上格式。\n' +
             '- 提示词顺序：全局 → 联系人档案 → 用户身份 → 关系 → 世界书；请严格区分角色与用户。'
         );
@@ -705,14 +723,21 @@
     function buildCallFormatRules(contact, callKind) {
         var roleName = String((contact && contact.name) || '角色');
         var kindLabel = callKind === 'video' ? '视频' : '语音';
+        var nativeMode = resolveConversationMode(contact) === 'native';
         return [
             '【通话格式规则·' + roleName + '】',
-            '【通话态·强制】你正处于与用户进行的实时' + kindLabel + '通话中；禁止当作文字聊天。',
+            nativeMode
+                ? '【模拟通话态·强制】本轮由前端渲染为' + kindLabel + '通话界面；请使用口头交流格式，不要宣称现实通话已经发生。'
+                : '【通话态·强制】你正处于与用户进行的实时' + kindLabel + '通话中；禁止当作文字聊天。',
             '1、可用 <thinking>...</thinking> 写简短思考；禁止输出 <miyavoice>、心声段或线上三段式尾部。',
-            '2、正文每行一句口语对白，条数 1–15 行，由你根据人设、情绪与当下情境自行决定；禁止「语音-」「表情包-」「图片-」等线上专属前缀。',
+            nativeMode
+                ? '2、正文每行一句口语对白，条数 1–15 行，根据当前上下文与明确任务决定；禁止「语音-」「表情包-」「图片-」等线上专属前缀。'
+                : '2、正文每行一句口语对白，条数 1–15 行，由你根据人设、情绪与当下情境自行决定；禁止「语音-」「表情包-」「图片-」等线上专属前缀。',
             '3、禁止在正文输出发起语音通话 / 发起视频通话 / 【拨打视频电话】 等拨号指令行，以及外卖- / 送礼- 等专属单行；你已在通话中，不得再次拨号。',
             '4、若系统注入「用户摄像头画面」，可结合画面自然回应，勿编造看不见的内容；若注入「用户摄像头状态」为已关闭，则完全看不到任何画面，禁止描述、猜测或编造用户外貌、表情、动作、穿着、环境等视觉内容。',
-            '5、保持人设与关系一致；勿复读上一轮相同句式。'
+            nativeMode
+                ? '5、基于当前有效上下文自然回应；勿复读上一轮相同句式，不得凭空补造现实经历或关系。'
+                : '5、保持人设与关系一致；勿复读上一轮相同句式。'
         ].join('\n');
     }
 
@@ -782,9 +807,10 @@
 
         parts.push(
             '【运转规则·通话】\n' +
-                '你是' +
+                (resolveConversationMode(contact) === 'native' ? '当前处于前端模拟通话界面；' : '你是' +
                 String((contact && contact.name) || '对方') +
-                '，正在真实通话；须消化人设与世界书；严禁辱骂用户；每轮正文仅口语对白行。'
+                '，正在真实通话；') +
+                '须消化当前有效上下文；严禁辱骂用户；每轮正文仅口语对白行。'
         );
 
         parts.push(buildCallFormatRules(contact, callKind));
@@ -799,20 +825,24 @@
         var roleName = String((contact && contact.name) || '对方');
         var userName = String((profile && profile.name) || '用户');
         return (
-            '1、你是' +
-            roleName +
-            '，是真实存在的人，有自己的生活和想法，有自己的感觉和态度，你并非在扮演，你必须消化好人设与世界书中的内容，作出符合当下情境的对话；不要油腻、不要凶很、禁止评判/威胁/控制的表达方式，要以温柔为底色，不要极端的去表达自己想要的东西/控制用户\n' +
-            '2、你知道' +
-            userName +
-            '是谁，知道自己和' +
-            userName +
-            '的关系，严禁对用户做出辱骂等行为，你要思考你和' +
-            userName +
-            '的关系，作出符合关系的对话\n' +
-            '3、现在是线上聊天，须具备真人聊天的跳跃性、活跃性与不连续性：可碎片化、一句话拆成多条发、中途转话题、隔几条再续上、语气忽然变轻或变冲；不必每轮都完整接话或逻辑闭环，在符合人设的前提下拥抱不确定感\n' +
-            '4、根据人设与当下情绪善用表达工具：emoji、颜文字、标点节奏（…！！？？～等）及表情包（走「表情包-名称」格式）；开朗活泼可多符号，内敛克制可少用；禁止每轮堆砌同款表情或固定句式\n' +
-            '5、禁止总是重复相同句式：对照近期已发原文换说法与节奏，勿每轮套用同一开场、撒娇模板或抱怨等结构\n' +
+            '1、你正在以' + roleName + '的设定进行角色化对话；须依据联系人档案、人设、关系、世界书与当前上下文作出回应，不额外宣称角色在现实中真实存在，也不擅自补充与既有设定冲突的身份或经历\n' +
+            '2、你知道' + userName + '是谁，并依据已注入的关系设定理解双方关系；角色的性格、价值观、情绪、表达方式及对' + userName + '的态度均以实际设定与当前情境为准，不默认温柔、友善、活泼、克制、亲密或顺从\n' +
+            '3、根据角色设定与当前情境决定回复是否完整、跳跃、简短、连续或转移话题；不强制模拟统一的真人聊天节奏，也不为制造活跃感而改变角色原有的交流方式\n' +
+            '4、emoji、颜文字、标点节奏、表情包及气泡拆分方式均由角色设定、当前情绪与表达需要决定；不预设使用频率或风格，也不强迫角色使用不符合其设定的表达工具\n' +
+            '5、避免机械重复近期完全相同的句式与内容；角色设定中的口癖、固定称呼、语言习惯及在当前情境下有意义的重复可以保留\n' +
             '6、每次回复之前输出思维过程，以<thinking>…</thinking>为格式（开闭标签均必填）；思维链只写在此段，禁止写进正文；禁止输出 [正文]、[/thinking] 等标记'
+        );
+    }
+
+    function buildNativeOperationRulesHead(contact, profile) {
+        var userName = String((profile && profile.name) || '用户');
+        return (
+            '1、你正在协助' + userName + '进行自然对话；根据当前消息、用户身份、世界书和明确任务回答，不要把自己描述成现实人物，也不要凭空补造个人经历。\n' +
+            '2、保持友善、清楚和有帮助的表达；不辱骂、不威胁、不控制用户；不因没有现实关系而反复解释幕后机制。\n' +
+            '3、聊天可以自然分行、转移话题或简短回应，但不要为了模拟真人而强行制造跳跃、暧昧或生活细节。\n' +
+            '4、根据上下文选择合适的语气、标点和少量 emoji；不要主动引入外卖、送礼、转账、情诗、朋友圈或通话等模拟功能。\n' +
+            '5、禁止总是重复相同句式；优先回应当前问题，必要时结合近期上下文。\n' +
+            '6、每次回复之前输出思维过程，以<thinking>…</thinking>为格式；思维链只写在此段，禁止写进正文。'
         );
     }
 
@@ -854,7 +884,19 @@
         );
     }
 
-    function buildPromptCapabilitiesBlock(chatSettings) {
+    function buildNativeOperationRules(contact, profile) {
+        var tail = buildOperationRulesFormatTail()
+            .replace(/同质化撒娇\/抱怨/g, '同质化表达')
+            .replace(/你方近期已发原文/g, '上下文中近期已出现的原文');
+        return (
+            '【运转规则·必读】\n' +
+            buildNativeOperationRulesHead(contact, profile) + '\n' +
+            tail
+        );
+    }
+
+    function buildPromptCapabilitiesBlock(chatSettings, contact) {
+        if (resolveConversationMode(contact) === 'native') return '';
         var caps = (chatSettings && chatSettings.promptCapabilities) || {};
         var lines = [
             '- 可为用户点外卖（单独一行：外卖-店铺｜菜品与数量｜合计金额｜送达备注）',
@@ -1045,7 +1087,8 @@
                     onlineNarrationUserPerson: (s && s.onlineNarrationUserPerson) || '2',
                     imageGenEnabled: isContactImageGenEnabled(s),
                     charAvatarSwapEnabled: !!(s && s.dynamicAvatar && s.dynamicAvatar.charEnabled),
-                    userAvatarSwapEnabled: !!(s && s.dynamicAvatar && s.dynamicAvatar.userEnabled)
+                    userAvatarSwapEnabled: !!(s && s.dynamicAvatar && s.dynamicAvatar.userEnabled),
+                    nativeMode: resolveConversationMode(contact) === 'native'
                 })
             );
         }
@@ -1065,6 +1108,7 @@
             chat &&
             chat.type !== 'group' &&
             global.MiyaChatLifeLike &&
+            resolveConversationMode(contact) !== 'native' &&
             typeof global.MiyaChatLifeLike.isEnabled === 'function' &&
             global.MiyaChatLifeLike.isEnabled(s) &&
             typeof global.MiyaChatLifeLike.buildNextPushRulesBlock === 'function'
@@ -1087,7 +1131,7 @@
         return blocks;
     }
 
-    function buildOnlineRulesBundle(contact, chatSettings) {
+    function buildOnlineRulesBundle(contact, chatSettings, conversationMode) {
         var fmt = getOnlineFormatApi();
         var st = global.miyaChatStore;
         var catalog =
@@ -1130,7 +1174,8 @@
                     onlineNarrationUserPerson: (s && s.onlineNarrationUserPerson) || '2',
                     imageGenEnabled: isContactImageGenEnabled(s),
                     charAvatarSwapEnabled: !!(dynAv.charEnabled),
-                    userAvatarSwapEnabled: !!(dynAv.userEnabled)
+                    userAvatarSwapEnabled: !!(dynAv.userEnabled),
+                    nativeMode: conversationMode === 'native'
                 })
             );
         } else {
@@ -1366,10 +1411,10 @@
             : buildWorldbookLayers(contact, contextText);
         appendLayerList(parts, wbLayers);
 
-        var capBlock = buildPromptCapabilitiesBlock(chatSettings);
+        var capBlock = buildPromptCapabilitiesBlock(chatSettings, contact);
         if (capBlock) parts.push(capBlock);
 
-        parts.push(buildOnlineRulesBundle(contact, chatSettings));
+        parts.push(buildOnlineRulesBundle(contact, chatSettings, resolveConversationMode(contact)));
 
         var outputParts = parts.filter(Boolean);
         var outputText = outputParts.join('\n\n');
@@ -1421,6 +1466,15 @@
         );
     }
 
+    function buildNativeThinkingRules(contact, profile) {
+        var userName = String((profile && profile.name) || '用户');
+        return (
+            '【思维链·必读】\n' +
+            '回复前可在 <thinking> 中简要整理' + userName + '当前的问题、有效上下文和回答重点；不要在其中编造现实经历、人物关系或未被提供的事实。\n' +
+            '思维链只写在此段，禁止写进正文；禁止输出 [正文]、[/thinking] 等标记。'
+        );
+    }
+
     /** 线上单聊：思维链置末注入（联系人档案之后、运转规则之前） */
     function appendOnlineThinkingRulesMessage(apiMessages, contact, profile, opts) {
         opts = opts && typeof opts === 'object' ? opts : {};
@@ -1431,7 +1485,9 @@
         if (thMod && typeof thMod.resolveForChat === 'function') {
             block = thMod.resolveForChat(opts.chatSettings, contact, profile);
         }
-        if (!block) block = buildThinkingRules(contact, profile);
+        if (!block) block = resolveConversationMode(contact) === 'native'
+            ? buildNativeThinkingRules(contact, profile)
+            : buildThinkingRules(contact, profile);
         if (!block) return;
         apiMessages.push({ role: 'system', content: block });
     }
@@ -1446,7 +1502,9 @@
         if (opMod && typeof opMod.resolveForChat === 'function') {
             block = opMod.resolveForChat(opts.chatSettings, contact, profile);
         }
-        if (!block) block = buildOperationRules(contact, profile);
+        if (!block) block = resolveConversationMode(contact) === 'native'
+            ? buildNativeOperationRules(contact, profile)
+            : buildOperationRules(contact, profile);
         if (!block) return;
         var hvTpl = global.MiyaChatHeartVoiceTemplates;
         var hvPreset =
@@ -3210,7 +3268,8 @@
                 poemUi && typeof poemUi.buildLovePoemInjectBlock === 'function'
                     ? poemUi.buildLovePoemInjectBlock({
                           style: opts.lovePoemStyle,
-                          roleName: (contact && contact.name) || '角色'
+                          roleName: (contact && contact.name) || '角色',
+                          nativeMode: resolveConversationMode(contact) === 'native'
                       })
                     : '';
             if (poemBlock) {
@@ -3242,12 +3301,15 @@
         }
 
         if (opts.callMode) {
+            var nativeCallMode = resolveConversationMode(contact) === 'native';
             apiMessages.push({
                 role: 'system',
                 content:
-                    '【通话态·强制提醒】你正在与用户进行实时' +
+                    (nativeCallMode ? '【模拟通话态·强制提醒】本轮由前端渲染为' : '【通话态·强制提醒】你正在与用户进行实时') +
                     (opts.callKind === 'video' ? '视频' : '语音') +
-                    '通话；绝不是线上文字聊天。请只输出通话口语对白。'
+                    (nativeCallMode
+                        ? '通话界面；请只输出适合口头交流的对白，不要宣称现实通话已经发生。'
+                        : '通话；绝不是线上文字聊天。请只输出通话口语对白。')
             });
             if (
                 global.MiyaChatCalls &&
@@ -5076,6 +5138,7 @@
         ensureWorldbookDepsReady: ensureWorldbookDepsReady,
         buildWorldbookBundle: buildWorldbookBundle,
         buildSystemPrompt: buildSystemPrompt,
+        resolveConversationMode: resolveConversationMode,
         messageContentText: messageContentText,
         buildCompletePromptSourceMeta: buildCompletePromptSourceMeta,
         buildSourceSegmentsFromParts: buildSourceSegmentsFromParts,

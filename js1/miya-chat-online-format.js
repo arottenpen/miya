@@ -1174,7 +1174,9 @@
             '用户只能看到 </thinking> 之后、<miyavoice> 之前的正文；思维链/心声/标记不得泄漏到正文。',
             '正文只输出一遍：禁止先写 [正文] 草稿再复读相同内容；禁止输出 [/thinking] 或心声字段行。',
             countHint + '；引用时「引用-摘抄」独占一行（摘抄内的冒号等自然标点仍属于原文），回复必须从下一行开始且每条各占一行；「 / 」为用户连发消息的分隔符，引用时一次只引其中一条。',
-            '真人聊天感：可跳跃、可断句、可转话题；勿复读近几轮话题/描写/动作；emoji/颜文字/标点须贴合人设情绪。',
+            opts.nativeMode
+                ? '表达应自然、清楚、适合聊天气泡阅读；可断句或转话题，但不要为了模拟真人而编造生活细节、现实行为或关系。'
+                : '真人聊天感：可跳跃、可断句、可转话题；勿复读近几轮话题/描写/动作；emoji/颜文字/标点须贴合人设情绪。',
             '发出前自检：① 正文无重复行 ② 一行一气泡 ③ 无结构标记 ④ 心声仅在 <miyavoice> 内 ⑤ 未复读近期话题与动作套路。'
         ];
         if (opts.autoTranslate) {
@@ -1516,7 +1518,7 @@
         return { bubbles: out };
     }
 
-    function buildHeartVoiceRulesBlock(roleName, preset) {
+    function buildHeartVoiceRulesBlock(roleName, preset, nativeMode) {
         var rn = trim(roleName) || '角色';
         var tplMod = global.MiyaChatHeartVoiceTemplates;
         if (preset && tplMod && typeof tplMod.buildHeartVoiceRulesFromPreset === 'function') {
@@ -1531,7 +1533,9 @@
             '好感度-数值（0–100 整数，' + rn + '对用户的当前好感度，每轮须据对话合理更新）',
             '欲望值-数值（0–100 整数，' + rn + '对用户的当前欲望值，每轮须据对话合理更新）',
             '当前状态-客观描述当前可观察到的外部状态，不写内心：若上文已给出明确角色设定，则写该角色此刻的动作、神态与环境互动（第三人称，只写可见行为）；若无角色设定，则写当前对话的状态与走向（话题、节奏、语境变化）',
-            '角色心声-' + rn + '的第一人称内心独白（须写足 40 字以上，1–3 句，私密真实，符合人设与当下关系；仅指本行内心独白字数，不含当前状态行）',
+            nativeMode
+                ? '角色心声-模型对当前对话的内在感受、判断或联想（须写足 40 字以上，1–3 句；内容应基于当前上下文，不得凭空补造经历、关系或现实事件；仅指本行字数，不含当前状态行）'
+                : '角色心声-' + rn + '的第一人称内心独白（须写足 40 字以上，1–3 句，私密真实，符合人设与当下关系；仅指本行内心独白字数，不含当前状态行）',
             '数值应相对上一轮有合理变化；禁止每轮照搬相同数字、相同状态描写或相同内心独白。',
             '发出前自检：是否已写满好感度/欲望值/当前状态/角色心声四行并正确闭合 </miyavoice>；不足则补全后再结束。',
             '若系统另行注入「上一轮心声」，本轮须对照更新，禁止输出重复/相同的心声（含四行均不得与前一轮雷同）。'
@@ -1586,6 +1590,7 @@
                 ? '本轮正文建议约 ' + bubbleMin + ' 行（仅供参考，可酌情增减，系统不会截断）。'
                 : '本轮正文建议 ' + bubbleMin + ' 至 ' + bubbleMax + ' 行（仅供参考，可酌情增减，系统不会截断；每行一条气泡）。';
         var hvPreset = opts.heartVoicePreset || null;
+        var nativeMode = opts.nativeMode === true;
         if (!hvPreset && opts.chatSettings) {
             var tplMod0 = global.MiyaChatHeartVoiceTemplates;
             if (tplMod0 && typeof tplMod0.resolvePresetForChat === 'function') {
@@ -1615,7 +1620,16 @@
             '- 用户普通文字无前缀，直接书写正文；仅当用户消息以「语音-」开头时才是语音条转写。',
             '- 勿把无前缀的用户文字当作语音；禁止写「听到你说…」「你的语音…」等暗示对方发了语音条的表述（除非对方消息明确以「语音-」开头）。'
         ];
+        if (nativeMode) {
+            rows = rows.filter(function (line) {
+                var text = String(line || '');
+                return text.indexOf('你想发位置时') < 0 && text.indexOf('你想给用户转账时') < 0;
+            }).map(function (line) {
+                return String(line || '').replace(/^8、每次引用/, '6、每次引用');
+            });
+        }
         var ruleNum = 9;
+        if (!nativeMode) {
         rows.push(
             '',
             ruleNum +
@@ -1680,12 +1694,13 @@
             );
             ruleNum += 1;
         }
+        }
         var formatExampleBody = [
             '引用-你刚才说：在干嘛呢？',
             '上班呢',
             '你呢'
         ];
-        if (opts.onlineNarrationEnabled) {
+        if (!nativeMode && opts.onlineNarrationEnabled) {
             var np = narrationCharSubjectParts(opts.onlineNarrationCharPerson, roleName);
             formatExampleBody.push(
                 '旁白-' + np.subj + '将手机扣在膝上，指节因用力而微微泛白，目光却不受控地飘向窗外——午后的光斜切进来，在桌沿投下一道暖色，' + np.pron + '盯着那道光看了两秒，才又低头把屏幕点亮',
@@ -1702,18 +1717,20 @@
                 '图片-窗边一束逆光里的白玫瑰，花瓣上还挂着细密水珠'
             );
         }
-        if (opts.onlineNarrationEnabled) {
+        if (!nativeMode && opts.onlineNarrationEnabled) {
             formatExampleBody.push(stickerEx || '（无表情包则不输出表情包行）');
         }
-        formatExampleBody = formatExampleBody.concat([
-            '位置-滨海市｜海晏区星澜路18号一层103室',
-            '转账-52｜一点心意',
-            '外卖-喜茶｜多肉葡萄×1、烤黑糖波波×1｜46｜送到公司前台',
-            '送礼-丝绒玫瑰礼盒｜1｜今天也想让你开心一下'
-        ]);
+        if (!nativeMode) {
+            formatExampleBody = formatExampleBody.concat([
+                '位置-滨海市｜海晏区星澜路18号一层103室',
+                '转账-52｜一点心意',
+                '外卖-喜茶｜多肉葡萄×1、烤黑糖波波×1｜46｜送到公司前台',
+                '送礼-丝绒玫瑰礼盒｜1｜今天也想让你开心一下'
+            ]);
+        }
         rows = rows.concat([
             '',
-            buildHeartVoiceRulesBlock(roleName, hvPreset),
+            buildHeartVoiceRulesBlock(roleName, hvPreset, nativeMode),
             '',
             '【输出顺序】',
             '<thinking>思维过程</thinking>',
@@ -1729,7 +1746,7 @@
             '（这里写思维过程）',
             '</thinking>'
         ].concat(formatExampleBody));
-        rows.push('【发朋友圈：今天风很软，想分享给你|配图1：窗边一杯热茶，蒸汽袅袅】');
+        if (!nativeMode) rows.push('【发朋友圈：今天风很软，想分享给你|配图1：窗边一杯热茶，蒸汽袅袅】');
         rows.push('哦哦哦');
         rows.push('<miyavoice>');
         if (hvPreset) {
@@ -1750,8 +1767,12 @@
         } else {
             rows.push('好感度-72');
             rows.push('欲望值-38');
-            rows.push('当前状态-她将手机扣在膝上，指尖无意识地摩挲杯沿，目光飘向窗外');
-            rows.push('角色心声-他回得比我想象中快……是刚好有空，还是也在等我？');
+            rows.push(nativeMode
+                ? '当前状态-对话正在围绕用户刚提出的问题继续，语气平稳，信息逐步展开'
+                : '当前状态-她将手机扣在膝上，指尖无意识地摩挲杯沿，目光飘向窗外');
+            rows.push(nativeMode
+                ? '角色心声-用户似乎希望得到直接但不生硬的回应。我应先处理当前问题，再根据上下文判断是否需要补充细节，避免把前端模拟形式误写成现实经历。'
+                : '角色心声-他回得比我想象中快……是刚好有空，还是也在等我？');
         }
         rows.push('</miyavoice>');
         if (opts.autoTranslate) {

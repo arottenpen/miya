@@ -22,6 +22,7 @@
         String(ch.name || '') + ':' + String(ch.groupId || '') + ':' +
         String(ch.avatar || '').slice(0, 64) + ':' +
         String(ch.prioritySystemPrompt == null ? '' : ch.prioritySystemPrompt)
+        + ':' + String(ch.conversationMode || 'roleplay')
       );
     });
     return parts.join('|');
@@ -35,6 +36,7 @@
       existing.name !== character.name ||
       String(existing.prioritySystemPrompt == null ? '' : existing.prioritySystemPrompt) !==
         String(character.prioritySystemPrompt == null ? '' : character.prioritySystemPrompt) ||
+      String(existing.conversationMode || 'roleplay') !== String(character.conversationMode || 'roleplay') ||
       String(existing.avatar || '').trim() !== String(character.avatar || '').trim();
   }
 
@@ -103,6 +105,7 @@
       prioritySystemPrompt: String(
         character.prioritySystemPrompt == null ? '' : character.prioritySystemPrompt
       ),
+      conversationMode: character.conversationMode === 'native' ? 'native' : 'roleplay',
       name: character.name,
       avatar: String(character.avatar || '').trim(),
       groupId: chatGroupId

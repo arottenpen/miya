@@ -1504,6 +1504,7 @@
             name: String((raw && raw.name) || '').trim(),
             remarkName: String((raw && raw.remarkName) || '').trim(),
             relationship: String((raw && raw.relationship) || '').trim(),
+            conversationMode: String((raw && raw.conversationMode) || '').trim() === 'native' ? 'native' : 'roleplay',
             avatar: trimContactAvatarForStore(raw && raw.avatar),
             avatarBlobId: String((raw && raw.avatarBlobId) || '').trim() || null,
             displayAvatar: normalizeDisplayAvatar(raw && raw.displayAvatar),
@@ -4065,8 +4066,9 @@
                         prioritySystemPrompt: String(
                             chronicleRow.prioritySystemPrompt == null
                                 ? ''
-                                : chronicleRow.prioritySystemPrompt
+                            : chronicleRow.prioritySystemPrompt
                         ),
+                        conversationMode: chronicleRow.conversationMode === 'native' ? 'native' : 'roleplay',
                         name: chronicleRow.name || existing.name,
                         avatar: trimContactAvatarForStore(chronicleRow.avatar || existing.avatar)
                     });
@@ -4079,6 +4081,7 @@
                             ? ''
                             : chronicleRow.prioritySystemPrompt
                     ),
+                    conversationMode: chronicleRow.conversationMode === 'native' ? 'native' : 'roleplay',
                     groupId: groupId || 'ct-default',
                     name: chronicleRow.name,
                     avatar: trimContactAvatarForStore(chronicleRow.avatar),
