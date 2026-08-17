@@ -2907,6 +2907,60 @@
         return applyOfflineMeetLabel(body, m, chatSettings);
     }
 
+    var postHistoryMemoryProviders = [];
+
+    function registerPostHistoryMemoryProvider(id, provider) {
+        var key = String(id || '').trim();
+        if (!key || typeof provider !== 'function') return false;
+        unregisterPostHistoryMemoryProvider(key);
+        postHistoryMemoryProviders.push({ id: key, buildMessages: provider });
+        return true;
+    }
+
+    function unregisterPostHistoryMemoryProvider(id) {
+        var key = String(id || '').trim();
+        if (!key) return false;
+        var before = postHistoryMemoryProviders.length;
+        postHistoryMemoryProviders = postHistoryMemoryProviders.filter(function (row) {
+            return row && row.id !== key;
+        });
+        return postHistoryMemoryProviders.length !== before;
+    }
+
+    function normalizePostHistoryMemoryMessages(value) {
+        var list = Array.isArray(value) ? value : value ? [value] : [];
+        return list
+            .map(function (item) {
+                if (typeof item === 'string') {
+                    var text = item.trim();
+                    return text ? { role: 'system', content: text } : null;
+                }
+                if (!item || typeof item !== 'object') return null;
+                var content = item.content;
+                if (typeof content === 'string') content = content.trim();
+                if (!content || (typeof content !== 'string' && !Array.isArray(content))) return null;
+                return { role: String(item.role || 'system'), content: content };
+            })
+            .filter(Boolean);
+    }
+
+    function buildBuiltinPostHistoryMemoryMessages(context) {
+        return normalizePostHistoryMemoryMessages(context && context.builtinMessages);
+    }
+
+    function appendPostHistoryMemoryMessages(apiMessages, context) {
+        buildBuiltinPostHistoryMemoryMessages(context).forEach(function (message) {
+            apiMessages.push(message);
+        });
+        postHistoryMemoryProviders.slice().forEach(function (row) {
+            try {
+                normalizePostHistoryMemoryMessages(row.buildMessages(context)).forEach(function (message) {
+                    apiMessages.push(message);
+                });
+            } catch (e) {}
+        });
+    }
+
     function buildApiMessages(chatId, userText, opts) {
         opts = opts && typeof opts === 'object' ? opts : {};
         var store = global.miyaChatStore;
@@ -3086,16 +3140,15 @@
             awInject && typeof awInject.buildSummaryContextBlock === 'function'
                 ? awInject.buildSummaryContextBlock(settings)
                 : '';
-        if (summaryBlock) {
-            apiMessages.push({ role: 'system', content: summaryBlock });
-        }
         var memExtract = global.MiyaChatMemoryExtract;
         var charMemBlock =
             memExtract && typeof memExtract.buildCharMemoryContextBlock === 'function'
                 ? memExtract.buildCharMemoryContextBlock(settings)
                 : '';
-        if (charMemBlock) {
-            apiMessages.push({ role: 'system', content: charMemBlock });
+        var usePostHistoryMemoryProviders = !opts.callMode && !opts.appointmentMode;
+        if (!usePostHistoryMemoryProviders) {
+            if (summaryBlock) apiMessages.push({ role: 'system', content: summaryBlock });
+            if (charMemBlock) apiMessages.push({ role: 'system', content: charMemBlock });
         }
         var mmApi = global.MiyaChatMoments;
         var momentsBlock =
@@ -3152,12 +3205,31 @@
                 }
             } catch (eCross) {}
         }
+        var hasPostHistoryCrossMemory = !!(offSumText || hasOfflineMirror || offlineCrossSlots.length);
+        var builtinPostHistoryMemoryMessages = [];
+        if (usePostHistoryMemoryProviders && summaryBlock) {
+            builtinPostHistoryMemoryMessages.push({ role: 'system', content: summaryBlock });
+        }
+        if (usePostHistoryMemoryProviders && charMemBlock) {
+            builtinPostHistoryMemoryMessages.push({ role: 'system', content: charMemBlock });
+        }
         if (
             !opts.appointmentMode &&
             !opts.callMode &&
             apMem &&
             typeof apMem.buildMemoryInteropPreambleBlock === 'function' &&
-            (offSumText || hasOfflineMirror || offlineCrossSlots.length || returnPrompt)
+            hasPostHistoryCrossMemory
+        ) {
+            builtinPostHistoryMemoryMessages.push({
+                role: 'system',
+                content: apMem.buildMemoryInteropPreambleBlock()
+            });
+        } else if (
+            returnPrompt &&
+            !opts.appointmentMode &&
+            !opts.callMode &&
+            apMem &&
+            typeof apMem.buildMemoryInteropPreambleBlock === 'function'
         ) {
             apiMessages.push({ role: 'system', content: apMem.buildMemoryInteropPreambleBlock() });
         }
@@ -3167,16 +3239,38 @@
             delete pendingOnlineReturnPromptByChat[chatId];
         }
         if (offSumText) {
-            apiMessages.push({ role: 'system', content: offSumText });
+            builtinPostHistoryMemoryMessages.push({ role: 'system', content: offSumText });
         }
         if (
             offlineCrossSlots.length &&
             apMem &&
             typeof apMem.injectCrossMemoryToApiMessages === 'function'
         ) {
-            apMem.injectCrossMemoryToApiMessages(apiMessages, offlineCrossSlots, '线下');
+            apMem.injectCrossMemoryToApiMessages(
+                builtinPostHistoryMemoryMessages,
+                offlineCrossSlots,
+                '线下'
+            );
         }
         appendHistoryToApiMessages(apiMessages, sliceAppend, settings);
+        if (usePostHistoryMemoryProviders) {
+            appendPostHistoryMemoryMessages(
+                apiMessages,
+                {
+                    chatId: chatId,
+                    canonicalChatId: apiChatId,
+                    chat: chat,
+                    contact: contact,
+                    profile: profile,
+                    settings: settings,
+                    userText: String(userText || ''),
+                    contextText: contextText,
+                    history: sliceAppend.slice(),
+                    options: opts,
+                    builtinMessages: builtinPostHistoryMemoryMessages
+                }
+            );
+        }
         if (!opts.callMode && !opts.appointmentMode) {
             attachTrailingRoundPhotosToApiMessages(apiMessages, sliceAppend);
         }
@@ -5144,6 +5238,8 @@
         buildSourceSegmentsFromParts: buildSourceSegmentsFromParts,
         findContactArchiveRow: findContactArchiveRow,
         resolveContactPrioritySystemPrompt: resolveContactPrioritySystemPrompt,
+        registerPostHistoryMemoryProvider: registerPostHistoryMemoryProvider,
+        unregisterPostHistoryMemoryProvider: unregisterPostHistoryMemoryProvider,
         buildApiMessages: buildApiMessages,
         setPendingOnlineReturnPrompt: function (chatId, text) {
             var key = String(chatId || '').trim();
