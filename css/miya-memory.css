@@ -1028,6 +1028,15 @@
   margin-bottom: 10px;
 }
 
+.mm-clip__memory-title {
+  display: block;
+  width: 100%;
+  color: var(--mm-ink, #3f342f);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .mm-tag--fixed {
   border-style: solid;
   border-color: var(--mm-accent);

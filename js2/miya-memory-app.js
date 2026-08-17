@@ -141,7 +141,11 @@
   function renderClipContent(row, type, id) {
     if (editingClip && editingClip.type === type && editingClip.id === id) {
       var memoryFields = type === 'cmem'
-        ? '<label class="mm-clip__field">关键词（用逗号或顿号分隔）' +
+        ? '<label class="mm-clip__field">标题' +
+            '<input class="mm-clip__keywords-input" id="miya-mem-edit-title" value="' +
+              esc(row.title || '') + '" placeholder="可选">' +
+          '</label>' +
+          '<label class="mm-clip__field">关键词（用逗号或顿号分隔）' +
             '<input class="mm-clip__keywords-input" id="miya-mem-edit-keywords" value="' +
               esc((row.keywords || []).join('、')) + '">' +
           '</label>' +
@@ -167,6 +171,9 @@
       var fixed = memMod && memMod.isFixedMemory ? memMod.isFixedMemory(row) : !!row.fixedInject;
       var keywords = Array.isArray(row.keywords) ? row.keywords : [];
       meta = '<div class="mm-clip__memory-meta">' +
+        (String(row.title || '').trim()
+          ? '<strong class="mm-clip__memory-title">' + esc(row.title) + '</strong>'
+          : '') +
         '<span class="mm-tag' + (fixed ? ' mm-tag--fixed' : '') + '">' +
           (fixed ? '固定注入' : '关键词召回') +
         '</span>' +
@@ -183,10 +190,12 @@
     return '<article class="mm-clip mm-clip--char mm-clip--new">' +
       '<header class="mm-clip__head"><strong>手动写入记忆</strong></header>' +
       '<div class="mm-clip__edit-wrap">' +
+        '<label class="mm-clip__field">标题（可选）' +
+          '<input class="mm-clip__keywords-input" id="miya-mem-new-title" placeholder="便于在阅览室识别"></label>' +
         '<textarea class="mm-clip__textarea" id="miya-mem-new-content" rows="6" placeholder="写下需要长期保留的记忆"></textarea>' +
-        '<label class="mm-clip__field">关键词（至少 3 个，用逗号或顿号分隔）' +
+        '<label class="mm-clip__field">关键词（可选，用逗号或顿号分隔）' +
           '<input class="mm-clip__keywords-input" id="miya-mem-new-keywords" placeholder="地点、事件、人物、约定"></label>' +
-        '<label class="mm-clip__check"><input type="checkbox" id="miya-mem-new-fixed"> 每轮固定注入</label>' +
+        '<p class="mm-console__hint">手动记忆会在每轮固定注入，不同步到外置记忆库。</p>' +
         '<div class="mm-clip__edit-actions">' +
           '<button type="button" class="mm-btn mm-btn--fill" data-save-new-memory>保存记忆</button>' +
           '<button type="button" class="mm-btn" data-cancel-new-memory>取消</button>' +
@@ -532,26 +541,24 @@
     if (!st) return;
     var area = $('miya-mem-new-content');
     var content = area ? String(area.value || '').trim() : '';
+    var titleInput = $('miya-mem-new-title');
+    var title = titleInput ? String(titleInput.value || '').trim().slice(0, 160) : '';
     var keywords = memoryKeywordsFromInput('miya-mem-new-keywords');
-    var fixed = !!(($('miya-mem-new-fixed') || {}).checked);
     if (!content) {
       toast('记忆内容不能为空');
-      return;
-    }
-    if (!fixed && keywords.length < 3) {
-      toast('关键词召回记忆至少需要 3 个关键词');
       return;
     }
     var settings = st.getChatSettings(selectedChatId);
     var list = (settings.charMemoryList || []).slice();
     list.push({
       id: 'cmem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
+      title: title,
       date: new Date().toLocaleString('zh-CN'),
       startIndex: '?',
       endIndex: '?',
       content: content,
       keywords: keywords,
-      fixedInject: fixed,
+      fixedInject: true,
       source: 'manual',
       createdAt: Date.now()
     });
@@ -648,6 +655,8 @@
         return r.id === id ? Object.assign({}, r, { content: text, updatedAt: Date.now() }) : r;
       });
     } else if (type === 'cmem') {
+      var titleInput = $('miya-mem-edit-title');
+      var title = titleInput ? String(titleInput.value || '').trim().slice(0, 160) : '';
       var keywords = memoryKeywordsFromInput('miya-mem-edit-keywords');
       var fixed = !!(($('miya-mem-edit-fixed') || {}).checked);
       if (!fixed && keywords.length < 3) {
@@ -657,6 +666,7 @@
       patch.charMemoryList = (settings.charMemoryList || []).map(function (r) {
         return r.id === id
           ? Object.assign({}, r, {
+              title: title,
               content: text,
               keywords: keywords,
               fixedInject: fixed,

@@ -6,7 +6,8 @@
 
     var MEMORY_OUTPUT_CONTRACT =
         '只输出一个 JSON 对象，不要代码块或其它文字。格式：' +
-        '{"content":"80-200字的角色视角长期记忆","keywords":["具体关键词1","具体关键词2","具体关键词3"]}。' +
+        '{"title":"简短明确的记忆主题","content":"80-200字的角色视角长期记忆","keywords":["具体关键词1","具体关键词2","具体关键词3"]}。' +
+        'title 必填，概括这条记忆的具体主题；' +
         'keywords 至少 3 个、最多 12 个，只写未来对话中可能自然出现的具体人物、地点、事件、物品、约定或偏好；' +
         '不要使用“记忆、聊天、用户、角色、事情、关系”等泛词，不要堆叠同义词。';
 
@@ -108,10 +109,12 @@
             throw new Error('记忆抽取未返回有效 JSON');
         }
         var content = String((parsed && parsed.content) || '').trim();
+        var title = String((parsed && parsed.title) || '').trim();
         var keywords = normalizeKeywords(parsed && parsed.keywords);
+        if (!title) throw new Error('记忆标题为空');
         if (!content) throw new Error('记忆正文为空');
         if (keywords.length < 3) throw new Error('记忆关键词少于 3 个');
-        return { content: content, keywords: keywords };
+        return { title: title.slice(0, 160), content: content, keywords: keywords };
     }
 
     function formatTsPrefix(ts) {
@@ -419,7 +422,7 @@
                 var replaceId = String(opts.replaceMemoryId || '').trim();
                 var confirmation = true;
                 if (replaceId && opts.confirmReplace) {
-                    var confirmMessage = result.content + '\n\n关键词：' + result.keywords.join('、');
+                    var confirmMessage = result.title + '\n\n' + result.content + '\n\n关键词：' + result.keywords.join('、');
                     confirmation = global.miyaDialog && typeof global.miyaDialog.confirm === 'function'
                         ? global.miyaDialog.confirm({
                               title: '确认替换这条记忆？',
@@ -438,6 +441,7 @@
                             if (!row || row.id !== replaceId) return row;
                             found = true;
                             return Object.assign({}, row, {
+                                title: result.title,
                                 content: result.content,
                                 keywords: result.keywords,
                                 fixedInject: isFixedMemory(row),
@@ -448,6 +452,7 @@
                     } else {
                         list.push({
                             id: newMemoryId(),
+                            title: result.title,
                             date: new Date().toLocaleString('zh-CN'),
                             startIndex: start,
                             endIndex: end,
@@ -459,6 +464,14 @@
                         });
                     }
                     return store.saveChatSettings(cid, { charMemoryList: list }).then(function () {
+                        var ext = global.MiyaExternalMemory;
+                        if (!replaceId && ext && typeof ext.writeExtractedMemory === 'function') {
+                            ext.writeExtractedMemory(cid, result).catch(function (err) {
+                                if (global.console && typeof global.console.warn === 'function') {
+                                    global.console.warn('[MiyaExternalMemory] write_memory failed:', err && err.message ? err.message : err);
+                                }
+                            });
+                        }
                         return true;
                     });
                 });

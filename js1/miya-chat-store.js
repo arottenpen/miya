@@ -672,6 +672,16 @@
             charMemoryList: [],
             memoryAutoRoundTrigger: 0,
             memoryAutoPrompt: '',
+            externalMemory: {
+                enabled: false,
+                endpoint: '',
+                memoryKey: '',
+                synonymsToken: '',
+                mcpToken: '',
+                synonyms: {},
+                synonymsVersion: '',
+                synonymsUpdatedAt: 0
+            },
             megaSummaryPrompt: '',
             roleReplyBubbleMin: 1,
             roleReplyBubbleMax: 5,
@@ -1070,6 +1080,22 @@
         if (!Array.isArray(out.charMemoryList)) out.charMemoryList = [];
         out.memoryAutoRoundTrigger = Math.min(500, Math.max(0, parseInt(out.memoryAutoRoundTrigger, 10) || 0));
         out.memoryAutoPrompt = String(out.memoryAutoPrompt || '').trim();
+        var extMemRaw = out.externalMemory && typeof out.externalMemory === 'object'
+            ? out.externalMemory
+            : {};
+        out.externalMemory = {
+            enabled: !!extMemRaw.enabled,
+            endpoint: String(extMemRaw.endpoint || '').trim().replace(/\/+$/, ''),
+            memoryKey: String(extMemRaw.memoryKey || '').trim(),
+            synonymsToken: String(extMemRaw.synonymsToken || '').trim(),
+            mcpToken: String(extMemRaw.mcpToken || '').trim(),
+            synonyms:
+                extMemRaw.synonyms && typeof extMemRaw.synonyms === 'object' && !Array.isArray(extMemRaw.synonyms)
+                    ? extMemRaw.synonyms
+                    : {},
+            synonymsVersion: String(extMemRaw.synonymsVersion || '').trim(),
+            synonymsUpdatedAt: Math.max(0, Number(extMemRaw.synonymsUpdatedAt) || 0)
+        };
         out.megaSummaryPrompt = String(out.megaSummaryPrompt || '').trim();
         if (!Array.isArray(out.momentsMemoryList)) out.momentsMemoryList = [];
         out.momentsMemoryInterop = out.momentsMemoryInterop !== false;
@@ -1138,6 +1164,9 @@
             var id = String(row.id || '').trim();
             if (!id) id = 'cmem_' + Date.now().toString(36) + '_' + i;
             var normalized = Object.assign({}, row, { id: id });
+            if (Object.prototype.hasOwnProperty.call(row, 'title')) {
+                normalized.title = String(row.title || '').trim().slice(0, 160);
+            }
             if (Object.prototype.hasOwnProperty.call(row, 'keywords')) {
                 normalized.keywords = Array.isArray(row.keywords)
                     ? row.keywords.map(function (k) { return String(k || '').trim(); }).filter(Boolean)

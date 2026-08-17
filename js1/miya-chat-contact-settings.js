@@ -1395,6 +1395,25 @@
       ) +
 
       renderZone('model', '模型高级', '运转规则、思维链与 Token 用量',
+        subBlock('外置记忆', 'Isolation Memory · 仅线上单聊', formCard((function () {
+          var ext = s.externalMemory || {};
+          var cacheCount = ext.synonyms && typeof ext.synonyms === 'object'
+            ? Object.keys(ext.synonyms).length
+            : 0;
+          var cacheText = cacheCount
+            ? ('已缓存 ' + cacheCount + ' 组同义词' +
+              (ext.synonymsVersion ? ' · 版本 ' + ext.synonymsVersion : ''))
+            : '尚未缓存同义词';
+          return toggleRow('mq-set-ext-memory-en', '启用外置记忆', '检索与自动抽取写入均与内置记忆并用', !!ext.enabled) +
+            fieldBlock('Worker 地址', '同义词读取 /api/synonyms；MCP 使用根路径', '<input type="url" class="ins-text-input" data-mq-set-ext-endpoint value="' + esc(ext.endpoint || '') + '" placeholder="https://example.workers.dev">') +
+            fieldBlock('Memory key', '只作为 MCP 请求参数发送，不进入模型提示词', '<input type="text" class="ins-text-input" data-mq-set-ext-key value="' + esc(ext.memoryKey || '') + '" autocomplete="off">') +
+            fieldBlock('读同义词凭据', 'Authorization: Bearer；仅发送到 /api/synonyms', '<input type="password" class="ins-text-input" data-mq-set-ext-syn-token value="' + esc(ext.synonymsToken || '') + '" autocomplete="off">') +
+            fieldBlock('MCP 凭据', 'Authorization: Bearer；仅发送到 MCP 根路径', '<input type="password" class="ins-text-input" data-mq-set-ext-mcp-token value="' + esc(ext.mcpToken || '') + '" autocomplete="off">') +
+            '<p class="st-form-hint" data-mq-set-ext-cache-status>' + esc(cacheText) + '</p>' +
+            '<div class="mi-btn-row">' +
+              '<button type="button" class="st-action-btn" data-mq-set-ext-refresh>刷新同义词</button>' +
+            '</div>';
+        })())) +
         subBlock('线上运转规则', '', formCard(
           (global.MiyaChatOperationRules
             ? global.MiyaChatOperationRules.buildChatSettingsPickerHtml(s.operationRulesPreset)
@@ -1649,6 +1668,19 @@
     }
     var prevMa = s.momentsAuto || {};
     var momentsAuto = readMomentsAutoFromRoot(root, prevMa);
+    var prevExternalMemory = s.externalMemory || {};
+    var externalMemory = {
+      enabled: isToggleOn(root, '#mq-set-ext-memory-en'),
+      endpoint: String((root.querySelector('[data-mq-set-ext-endpoint]') || {}).value || '').trim().replace(/\/+$/, ''),
+      memoryKey: String((root.querySelector('[data-mq-set-ext-key]') || {}).value || '').trim(),
+      synonymsToken: String((root.querySelector('[data-mq-set-ext-syn-token]') || {}).value || '').trim(),
+      mcpToken: String((root.querySelector('[data-mq-set-ext-mcp-token]') || {}).value || '').trim(),
+      synonyms: prevExternalMemory.synonyms && typeof prevExternalMemory.synonyms === 'object'
+        ? prevExternalMemory.synonyms
+        : {},
+      synonymsVersion: String(prevExternalMemory.synonymsVersion || '').trim(),
+      synonymsUpdatedAt: Math.max(0, Number(prevExternalMemory.synonymsUpdatedAt) || 0)
+    };
     var patch = {
       remarkName: (root.querySelector('[data-mq-set-remark]') || {}).value || '',
       relationship: (root.querySelector('[data-mq-set-rel]') || {}).value || '',
@@ -1674,6 +1706,7 @@
       heartVoicePreset: heartVoicePreset,
       heartVoicePresetSnapshot: heartVoicePresetSnapshot,
       momentsAuto: momentsAuto,
+      externalMemory: externalMemory,
       backgroundMessage: readLifeLikeBackground(chatBg, root)
     };
     patch.dynamicAvatar = {
@@ -1758,6 +1791,13 @@
     setToggle('#mq-set-tts-en', draft.ttsEnabled != null ? draft.ttsEnabled : !!String(p.minimaxVoiceId || '').trim());
     setVal('[data-mq-set-voice-id]', p.minimaxVoiceId);
     setVal('[data-mq-set-lang]', p.minimaxLanguageBoost);
+    if (p.externalMemory) {
+      setToggle('#mq-set-ext-memory-en', p.externalMemory.enabled);
+      setVal('[data-mq-set-ext-endpoint]', p.externalMemory.endpoint);
+      setVal('[data-mq-set-ext-key]', p.externalMemory.memoryKey);
+      setVal('[data-mq-set-ext-syn-token]', p.externalMemory.synonymsToken);
+      setVal('[data-mq-set-ext-mcp-token]', p.externalMemory.mcpToken);
+    }
 
     if (p.dynamicAvatar) {
       setToggle('#mq-set-dava-char', p.dynamicAvatar.charEnabled);
@@ -1859,6 +1899,33 @@
     }).catch(function () {});
   }
 
+  function refreshExternalMemorySynonyms() {
+    if (!store || !state.chatId || !pageEl) return Promise.resolve();
+    var root = pageEl.querySelector('[data-mq-set-body]');
+    var data = readForm(root);
+    var ext = data && data.settingsPatch && data.settingsPatch.externalMemory;
+    var mod = global.MiyaExternalMemory;
+    if (!ext || !ext.endpoint || !ext.synonymsToken) {
+      toast('请先填写 Worker 地址和读同义词凭据');
+      return Promise.resolve();
+    }
+    if (!mod || typeof mod.refreshSynonyms !== 'function') {
+      toast('外置记忆模块未就绪');
+      return Promise.resolve();
+    }
+    toast('正在刷新同义词…');
+    return mod.refreshSynonyms(state.chatId, ext).then(function () {
+      state.formDraft = null;
+      toast('同义词已更新');
+      scheduleRender({ fromStore: true, skipContextUsage: true });
+    }).catch(function (err) {
+      toast('同义词刷新失败');
+      if (global.console && typeof global.console.warn === 'function') {
+        global.console.warn('[MiyaExternalMemory] manual refresh failed:', err && err.message ? err.message : err);
+      }
+    });
+  }
+
   function saveForm() {
     if (!store || !state.chatId || !pageEl) return Promise.resolve();
     var root = pageEl.querySelector('[data-mq-set-body]');
@@ -1870,6 +1937,7 @@
     var emojiValid = useAllEmo || data.emojiGroupIds.length > 0;
     var prevWa = c.settings.weatherAwareness;
     var nextWa = data.settingsPatch.weatherAwareness;
+    var prevExt = c.settings.externalMemory || {};
     var chain = Promise.resolve();
     if (data.profileId && data.profileId !== c.chat.profileId) {
       chain = chain.then(function () { return store.updateChat(state.chatId, { profileId: data.profileId }); });
@@ -1941,6 +2009,28 @@
         }
       }
       refreshWeatherAfterSaveInBackground(prevWa, nextWa);
+      var extSaved = data.settingsPatch && data.settingsPatch.externalMemory;
+      var extConnectionChanged = extSaved && (
+        String(extSaved.endpoint || '') !== String(prevExt.endpoint || '') ||
+        String(extSaved.synonymsToken || '') !== String(prevExt.synonymsToken || '')
+      );
+      if (
+        extSaved &&
+        extSaved.enabled &&
+        (extConnectionChanged || !Object.keys(extSaved.synonyms || {}).length) &&
+        extSaved.endpoint &&
+        extSaved.synonymsToken &&
+        global.MiyaExternalMemory &&
+        typeof global.MiyaExternalMemory.refreshSynonyms === 'function'
+      ) {
+        global.MiyaExternalMemory.refreshSynonyms(state.chatId).then(function () {
+          scheduleRender({ fromStore: true, skipContextUsage: true });
+        }).catch(function (err) {
+          if (global.console && typeof global.console.warn === 'function') {
+            global.console.warn('[MiyaExternalMemory] initial synonyms refresh failed:', err && err.message ? err.message : err);
+          }
+        });
+      }
     }).catch(function () { toast('保存失败'); });
   }
 
@@ -2109,6 +2199,7 @@
       if (e.target.closest('[data-mq-set-save]')) { saveForm(); return; }
       if (e.target.closest('[data-mq-set-weather-sense]')) { runWeatherSense(); return; }
       if (e.target.closest('[data-mq-set-weather-sync-app]')) { syncWeatherAppIntoForm(); return; }
+      if (e.target.closest('[data-mq-set-ext-refresh]')) { refreshExternalMemorySynonyms(); return; }
 
       var zoneToggle = e.target.closest('[data-mq-set-zone-toggle]');
       if (zoneToggle) {

@@ -3283,7 +3283,8 @@
                     contextText: contextText,
                     history: sliceAppend.slice(),
                     options: opts,
-                    builtinMessages: builtinPostHistoryMemoryMessages
+                    builtinMessages: builtinPostHistoryMemoryMessages,
+                    memoryRecallDebug: memoryRecallDebug
                 }
             );
         }
@@ -4361,6 +4362,26 @@
             })
             .then(function () {
                 return ensureWorldbookDepsReady();
+            })
+            .then(function () {
+                var ext = global.MiyaExternalMemory;
+                var extChat = store && store.findChat ? store.findChat(chatId) : null;
+                if (
+                    ext &&
+                    typeof ext.prepareForChat === 'function' &&
+                    extChat &&
+                    extChat.type !== 'group' &&
+                    !options.callMode &&
+                    !options.appointmentMode &&
+                    !options.isAutoPush &&
+                    !options.isOffline &&
+                    !options.isLifeLike &&
+                    !options.isRegenerate &&
+                    !options.lovePoemMode &&
+                    !options.coupleInviteMode
+                ) {
+                    return ext.prepareForChat(chatId);
+                }
             })
             .then(function () {
                 if (typeof global.miyaYieldToMain === 'function') {
