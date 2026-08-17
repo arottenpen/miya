@@ -8,6 +8,7 @@
   var selectedChatId = null;
   /** @type {{ type: 'sum'|'mega'|'cmem', id: string }|null} */
   var editingClip = null;
+  var creatingMemory = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -128,9 +129,10 @@
       .replace(/>/g, '&gt;');
   }
 
-  function clipHeadActions(editAttr, delAttr, id, extraTag) {
+  function clipHeadActions(editAttr, delAttr, id, extraTag, extraActions) {
     return (extraTag || '') +
       '<span class="mm-clip__acts">' +
+        (extraActions || '') +
         '<button type="button" class="mm-clip__edit" ' + editAttr + '="' + esc(id) + '">编辑</button>' +
         '<button type="button" class="mm-clip__del" ' + delAttr + '="' + esc(id) + '">删除</button>' +
       '</span>';
@@ -138,17 +140,59 @@
 
   function renderClipContent(row, type, id) {
     if (editingClip && editingClip.type === type && editingClip.id === id) {
+      var memoryFields = type === 'cmem'
+        ? '<label class="mm-clip__field">关键词（用逗号或顿号分隔）' +
+            '<input class="mm-clip__keywords-input" id="miya-mem-edit-keywords" value="' +
+              esc((row.keywords || []).join('、')) + '">' +
+          '</label>' +
+          '<label class="mm-clip__check"><input type="checkbox" id="miya-mem-edit-fixed"' +
+            ((global.MiyaChatMemoryExtract && global.MiyaChatMemoryExtract.isFixedMemory &&
+              global.MiyaChatMemoryExtract.isFixedMemory(row)) ? ' checked' : '') +
+            '> 每轮固定注入</label>'
+        : '';
       return '<div class="mm-clip__edit-wrap">' +
         '<textarea class="mm-clip__textarea" id="miya-mem-edit-area" rows="8">' +
           escTextarea(row.content || '') +
         '</textarea>' +
+        memoryFields +
         '<div class="mm-clip__edit-actions">' +
           '<button type="button" class="mm-btn mm-btn--fill" data-save-edit="' + esc(type) + '" data-edit-id="' + esc(id) + '">保存</button>' +
           '<button type="button" class="mm-btn" data-cancel-edit>取消</button>' +
         '</div>' +
       '</div>';
     }
-    return '<div class="mm-clip__body">' + esc(row.content || '').replace(/\n/g, '<br>') + '</div>';
+    var meta = '';
+    if (type === 'cmem') {
+      var memMod = global.MiyaChatMemoryExtract;
+      var fixed = memMod && memMod.isFixedMemory ? memMod.isFixedMemory(row) : !!row.fixedInject;
+      var keywords = Array.isArray(row.keywords) ? row.keywords : [];
+      meta = '<div class="mm-clip__memory-meta">' +
+        '<span class="mm-tag' + (fixed ? ' mm-tag--fixed' : '') + '">' +
+          (fixed ? '固定注入' : '关键词召回') +
+        '</span>' +
+        (keywords.length
+          ? '<span class="mm-clip__keywords">' + esc(keywords.join(' · ')) + '</span>'
+          : '<span class="mm-clip__keywords mm-clip__keywords--legacy">旧记忆 · 待重新提取关键词</span>') +
+      '</div>';
+    }
+    return meta + '<div class="mm-clip__body">' + esc(row.content || '').replace(/\n/g, '<br>') + '</div>';
+  }
+
+  function renderNewMemoryForm() {
+    if (!creatingMemory) return '';
+    return '<article class="mm-clip mm-clip--char mm-clip--new">' +
+      '<header class="mm-clip__head"><strong>手动写入记忆</strong></header>' +
+      '<div class="mm-clip__edit-wrap">' +
+        '<textarea class="mm-clip__textarea" id="miya-mem-new-content" rows="6" placeholder="写下需要长期保留的记忆"></textarea>' +
+        '<label class="mm-clip__field">关键词（至少 3 个，用逗号或顿号分隔）' +
+          '<input class="mm-clip__keywords-input" id="miya-mem-new-keywords" placeholder="地点、事件、人物、约定"></label>' +
+        '<label class="mm-clip__check"><input type="checkbox" id="miya-mem-new-fixed"> 每轮固定注入</label>' +
+        '<div class="mm-clip__edit-actions">' +
+          '<button type="button" class="mm-btn mm-btn--fill" data-save-new-memory>保存记忆</button>' +
+          '<button type="button" class="mm-btn" data-cancel-new-memory>取消</button>' +
+        '</div>' +
+      '</div>' +
+    '</article>';
   }
 
   function buildTimelineCards(items, opts) {
@@ -217,10 +261,19 @@
     });
 
     var charMemBlocks = charMemList.map(function (row, i) {
+      var memMod = global.MiyaChatMemoryExtract;
+      var fixed = memMod && memMod.isFixedMemory ? memMod.isFixedMemory(row) : !!row.fixedInject;
+      var extraActions =
+        '<button type="button" class="mm-clip__edit" data-toggle-cmem-fixed="' + esc(row.id) + '">' +
+          (fixed ? '取消固定' : '固定') +
+        '</button>' +
+        (row.source === 'manual'
+          ? ''
+          : '<button type="button" class="mm-clip__edit" data-reextract-cmem="' + esc(row.id) + '">重新提取</button>');
       return '<article class="mm-clip mm-clip--char" data-cmem-id="' + esc(row.id) + '">' +
         '<header class="mm-clip__head">' +
           '<strong>忆 · 第 ' + row.startIndex + '–' + row.endIndex + ' 条</strong>' +
-          clipHeadActions('data-edit-cmem', 'data-del-cmem', row.id) +
+          clipHeadActions('data-edit-cmem', 'data-del-cmem', row.id, '', extraActions) +
         '</header>' +
         renderClipContent(row, 'cmem', row.id) +
       '</article>';
@@ -281,8 +334,10 @@
         '<div class="mm-chapter__head">' +
           '<span class="mm-chapter__no">03</span>' +
           '<h3 class="mm-chapter__title">角色记忆</h3>' +
-          '<span class="mm-chapter__sub">' + charMemList.length + ' 条 · 自动/角色视角</span>' +
+          '<span class="mm-chapter__sub">' + charMemList.length + ' 条 · 自动/手动</span>' +
+          '<button type="button" class="mm-btn mm-btn--small" data-new-memory>新建</button>' +
         '</div>' +
+        (creatingMemory ? '<div class="mm-timeline">' + renderNewMemoryForm() + '</div>' : '') +
         buildTimelineCards(charMemBlocks, { emptyLabel: '尚无角色记忆' }) +
       '</section>';
   }
@@ -360,6 +415,7 @@
         var rolesEl = $('miya-mem-roles');
         if (rolesEl && rolesEl.dataset.mmDragged) return;
         editingClip = null;
+        creatingMemory = false;
         selectedChatId = roleBtn.getAttribute('data-mem-chat');
         renderRoleList();
         renderSummaryDetail(selectedChatId);
@@ -375,6 +431,33 @@
       }
       if (t.id === 'miya-mem-run-mega' || t.closest('#miya-mem-run-mega')) {
         runMegaSummary();
+        return;
+      }
+      if (t.closest('[data-new-memory]')) {
+        creatingMemory = true;
+        editingClip = null;
+        renderSummaryDetail(selectedChatId);
+        var newArea = $('miya-mem-new-content');
+        if (newArea) newArea.focus();
+        return;
+      }
+      if (t.closest('[data-cancel-new-memory]')) {
+        creatingMemory = false;
+        renderSummaryDetail(selectedChatId);
+        return;
+      }
+      if (t.closest('[data-save-new-memory]')) {
+        saveNewMemory();
+        return;
+      }
+      var toggleFixed = t.closest('[data-toggle-cmem-fixed]');
+      if (toggleFixed) {
+        toggleCharMemoryFixed(toggleFixed.getAttribute('data-toggle-cmem-fixed'));
+        return;
+      }
+      var reextract = t.closest('[data-reextract-cmem]');
+      if (reextract) {
+        reextractCharMemory(reextract.getAttribute('data-reextract-cmem'));
         return;
       }
       var editSum = t.closest('[data-edit-sum]');
@@ -434,6 +517,116 @@
     if (selectedChatId) renderSummaryDetail(selectedChatId);
   }
 
+  function memoryKeywordsFromInput(id) {
+    var input = $(id);
+    var raw = input ? input.value : '';
+    var memMod = global.MiyaChatMemoryExtract;
+    return memMod && typeof memMod.normalizeKeywords === 'function'
+      ? memMod.normalizeKeywords(raw)
+      : String(raw || '').split(/[，,、\n]+/).map(function (item) { return item.trim(); }).filter(Boolean);
+  }
+
+  function saveNewMemory() {
+    if (!selectedChatId) return;
+    var st = global.miyaChatStore;
+    if (!st) return;
+    var area = $('miya-mem-new-content');
+    var content = area ? String(area.value || '').trim() : '';
+    var keywords = memoryKeywordsFromInput('miya-mem-new-keywords');
+    var fixed = !!(($('miya-mem-new-fixed') || {}).checked);
+    if (!content) {
+      toast('记忆内容不能为空');
+      return;
+    }
+    if (!fixed && keywords.length < 3) {
+      toast('关键词召回记忆至少需要 3 个关键词');
+      return;
+    }
+    var settings = st.getChatSettings(selectedChatId);
+    var list = (settings.charMemoryList || []).slice();
+    list.push({
+      id: 'cmem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
+      date: new Date().toLocaleString('zh-CN'),
+      startIndex: '?',
+      endIndex: '?',
+      content: content,
+      keywords: keywords,
+      fixedInject: fixed,
+      source: 'manual',
+      createdAt: Date.now()
+    });
+    st.saveChatSettings(selectedChatId, { charMemoryList: list }).then(function () {
+      creatingMemory = false;
+      toast('已写入记忆');
+      renderSummaryDetail(selectedChatId);
+      renderRoleList();
+    });
+  }
+
+  function toggleCharMemoryFixed(memId) {
+    if (!selectedChatId || !memId) return;
+    var st = global.miyaChatStore;
+    if (!st) return;
+    var settings = st.getChatSettings(selectedChatId);
+    var memMod = global.MiyaChatMemoryExtract;
+    var target = (settings.charMemoryList || []).find(function (row) { return row && row.id === memId; });
+    if (!target) return;
+    var currentlyFixed = memMod && memMod.isFixedMemory
+      ? memMod.isFixedMemory(target)
+      : !!target.fixedInject;
+    if (currentlyFixed && memoryKeywordsFromRow(target).length < 3) {
+      toast('请先编辑并补充至少 3 个关键词');
+      return;
+    }
+    var list = (settings.charMemoryList || []).map(function (row) {
+      return row && row.id === memId
+        ? Object.assign({}, row, { fixedInject: !currentlyFixed, keywords: memoryKeywordsFromRow(row), updatedAt: Date.now() })
+        : row;
+    });
+    st.saveChatSettings(selectedChatId, { charMemoryList: list }).then(function () {
+      toast(currentlyFixed ? '已改为关键词召回' : '已设为固定注入');
+      renderSummaryDetail(selectedChatId);
+    });
+  }
+
+  function memoryKeywordsFromRow(row) {
+    var memMod = global.MiyaChatMemoryExtract;
+    return memMod && typeof memMod.normalizeKeywords === 'function'
+      ? memMod.normalizeKeywords(row && row.keywords)
+      : (Array.isArray(row && row.keywords) ? row.keywords : []);
+  }
+
+  function reextractCharMemory(memId) {
+    if (!selectedChatId || !memId) return;
+    var st = global.miyaChatStore;
+    var memMod = global.MiyaChatMemoryExtract;
+    if (!st || !memMod || typeof memMod.performMemoryExtract !== 'function') return;
+    var settings = st.getChatSettings(selectedChatId);
+    var row = (settings.charMemoryList || []).find(function (item) { return item && item.id === memId; });
+    if (row && row.sourceRangeMissing) {
+      toast('对应原聊天曾被清理，旧记忆已保留');
+      return;
+    }
+    var start = Number(row && row.startIndex) || 0;
+    var end = Number(row && row.endIndex) || 0;
+    if (!start || !end || end < start) {
+      toast('手动记忆没有可重新提取的原聊天范围');
+      return;
+    }
+    toast('正在从原聊天重新提取…');
+    memMod.performMemoryExtract(selectedChatId, {
+      start: start,
+      end: end,
+      replaceMemoryId: memId,
+      requireCompleteRange: true,
+      confirmReplace: true
+    }).then(function (ok) {
+      if (ok) toast('记忆已重新提取');
+      renderSummaryDetail(selectedChatId);
+      renderRoleList();
+    });
+  }
+
   function saveEditClip(type, id) {
     if (!selectedChatId || !id) return;
     var st = global.miyaChatStore;
@@ -455,8 +648,21 @@
         return r.id === id ? Object.assign({}, r, { content: text, updatedAt: Date.now() }) : r;
       });
     } else if (type === 'cmem') {
+      var keywords = memoryKeywordsFromInput('miya-mem-edit-keywords');
+      var fixed = !!(($('miya-mem-edit-fixed') || {}).checked);
+      if (!fixed && keywords.length < 3) {
+        toast('关键词召回记忆至少需要 3 个关键词');
+        return;
+      }
       patch.charMemoryList = (settings.charMemoryList || []).map(function (r) {
-        return r.id === id ? Object.assign({}, r, { content: text, updatedAt: Date.now() }) : r;
+        return r.id === id
+          ? Object.assign({}, r, {
+              content: text,
+              keywords: keywords,
+              fixedInject: fixed,
+              updatedAt: Date.now()
+            })
+          : r;
       });
     } else {
       return;
@@ -567,6 +773,7 @@
     if (!el) return;
     ensureStore().then(function () {
       selectedChatId = null;
+      creatingMemory = false;
       el.removeAttribute('hidden');
       el.classList.add('is-open');
       el.setAttribute('aria-hidden', 'false');

@@ -3725,6 +3725,12 @@
     var chat = store && state.chatId ? store.findChat(state.chatId) : null;
     var snap = chat && chat.lastRequestPreview;
     var messages = snap && Array.isArray(snap.messages) ? snap.messages : [];
+    var recall = snap && snap.memoryRecall && typeof snap.memoryRecall === 'object' ? snap.memoryRecall : null;
+    var recallText = recall
+      ? '召回诊断：查询 ' + String(recall.queryText || '').length + ' 字 · 候选 ' + String(recall.candidateCount || 0) +
+        ' · 固定 ' + String(recall.fixedCount || 0) + ' · 命中 ' + String(recall.recalledCount || 0) +
+        (recall.memoryInterop === false ? ' · 记忆互通关闭' : '')
+      : '召回诊断：未记录（请确认已加载最新脚本）';
     var structure = messages.length ? messages.map(function (m, i) {
       var content = m && m.content !== null && typeof m.content === 'object'
         ? JSON.stringify(m.content, null, 2)
@@ -3735,12 +3741,14 @@
     var json = snap ? JSON.stringify({
       messages: messages,
       settings: snap.settings || {},
+      memoryRecall: snap.memoryRecall || {},
       updatedAt: snap.updatedAt || 0,
       status: snap.status || ''
     }, null, 2) : '';
     var settings = snap && snap.settings ? snap.settings : null;
     ov.innerHTML = '<div class="qq-sheet qq-request-preview" role="dialog" aria-modal="true">' +
       sheetGrabHead('REQUEST PREVIEW', '本轮最后一次实际请求', settings ? 'model ' + esc(settings.model || '未记录') + ' · temperature ' + esc(settings.temperature) : '请求尝试失败后仍保留快照') +
+      '<p class="qq-request-preview__hint">' + esc(recallText) + '</p>' +
       '<div class="qq-request-preview__tabs"><button type="button" class="is-active" data-request-view="structure">结构</button><button type="button" data-request-view="json">原始 JSON</button></div>' +
       '<div class="qq-request-preview__body" data-request-body>' + structure + '</div>' +
       '<button type="button" class="qq-sheet__cancel" data-sheet-close>关闭</button></div>';

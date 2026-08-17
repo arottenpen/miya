@@ -3141,9 +3141,25 @@
                 ? awInject.buildSummaryContextBlock(settings)
                 : '';
         var memExtract = global.MiyaChatMemoryExtract;
+        var memoryQueryText = String(userText || '').trim();
+        if (!memoryQueryText) {
+            var memoryQueryParts = [];
+            for (var memoryQueryIndex = sliceAppend.length - 1; memoryQueryIndex >= 0; memoryQueryIndex--) {
+                var memoryQueryRow = sliceAppend[memoryQueryIndex];
+                if (!memoryQueryRow || memoryQueryRow.deleted) continue;
+                if (memoryQueryRow.role !== 'user') {
+                    if (memoryQueryParts.length) break;
+                    continue;
+                }
+                var memoryQueryPart = messageContentText(memoryQueryRow).trim();
+                if (memoryQueryPart) memoryQueryParts.unshift(memoryQueryPart);
+            }
+            memoryQueryText = memoryQueryParts.join(USER_MSG_JOIN).trim();
+        }
+        var memoryRecallDebug = {};
         var charMemBlock =
             memExtract && typeof memExtract.buildCharMemoryContextBlock === 'function'
-                ? memExtract.buildCharMemoryContextBlock(settings)
+                ? memExtract.buildCharMemoryContextBlock(settings, memoryQueryText, memoryRecallDebug)
                 : '';
         var usePostHistoryMemoryProviders = !opts.callMode && !opts.appointmentMode;
         if (!usePostHistoryMemoryProviders) {
@@ -3600,6 +3616,7 @@
             chat: chat,
             latestHumanRole: sliceAppend.length ? sliceAppend[sliceAppend.length - 1].role : '',
             htmlMode: !!htmlMode,
+            memoryRecallDebug: memoryRecallDebug,
             promptMeta: buildPromptMeta(apiMessages, wbBundle.meta),
             worldbookMeta: wbBundle.meta
         };
@@ -4377,6 +4394,7 @@
                     var preview = {
                         messages: reqPayload.messages,
                         settings: { model: slice.model, temperature: slice.temperature },
+                        memoryRecall: built.memoryRecallDebug || {},
                         updatedAt: Date.now(),
                         status: 'attempted'
                     };

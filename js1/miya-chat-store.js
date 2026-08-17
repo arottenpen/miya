@@ -1137,7 +1137,17 @@
             if (!row || typeof row !== 'object') return row;
             var id = String(row.id || '').trim();
             if (!id) id = 'cmem_' + Date.now().toString(36) + '_' + i;
-            return Object.assign({}, row, { id: id });
+            var normalized = Object.assign({}, row, { id: id });
+            if (Object.prototype.hasOwnProperty.call(row, 'keywords')) {
+                normalized.keywords = Array.isArray(row.keywords)
+                    ? row.keywords.map(function (k) { return String(k || '').trim(); }).filter(Boolean)
+                    : [];
+            }
+            if (Object.prototype.hasOwnProperty.call(row, 'fixedInject')) {
+                normalized.fixedInject = !!row.fixedInject;
+            }
+            if (row.source) normalized.source = String(row.source);
+            return normalized;
         });
         out.summaryList = out.summaryList.map(function (row, i) {
             if (!row || typeof row !== 'object') return row;
@@ -1584,6 +1594,7 @@
                 model: String(raw.settings && raw.settings.model || '').slice(0, 200),
                 temperature: Number(raw.settings && raw.settings.temperature)
             },
+            memoryRecall: cloneRequestPreviewValue(raw.memoryRecall, {}),
             updatedAt: Number(raw.updatedAt) || 0,
             status: String(raw.status || '').slice(0, 40)
         };

@@ -4,9 +4,26 @@
 (function (global) {
     'use strict';
 
+    var MEMORY_OUTPUT_CONTRACT =
+        '只输出一个 JSON 对象，不要代码块或其它文字。格式：' +
+        '{"content":"80-200字的角色视角长期记忆","keywords":["具体关键词1","具体关键词2","具体关键词3"]}。' +
+        'keywords 至少 3 个、最多 12 个，只写未来对话中可能自然出现的具体人物、地点、事件、物品、约定或偏好；' +
+        '不要使用“记忆、聊天、用户、角色、事情、关系”等泛词，不要堆叠同义词。';
+
     var DEFAULT_MEMORY_PROMPT =
         '阅读以下对话，从角色视角提取对其重要的记忆：情感转折、约定与承诺、喜好与禁忌、关系变化、关键事件与细节。' +
-        '客观区分双方，按时间线整理，每条记忆简洁明确，整体 80-200 字为宜；';
+        '客观区分双方，按时间线整理。' + MEMORY_OUTPUT_CONTRACT;
+
+    var GENERIC_KEYWORDS = {
+        '记忆': true,
+        '聊天': true,
+        '用户': true,
+        '角色': true,
+        '事情': true,
+        '关系': true,
+        '对话': true,
+        '内容': true
+    };
 
     var generating = {};
 
@@ -64,6 +81,39 @@
         return '';
     }
 
+    function normalizeKeywords(value) {
+        var list = Array.isArray(value)
+            ? value
+            : String(value || '').split(/[，,、\n]+/);
+        var seen = {};
+        return list
+            .map(function (item) { return String(item || '').trim(); })
+            .filter(function (item) {
+                var key = item.toLowerCase();
+                if (!key || GENERIC_KEYWORDS[key] || seen[key]) return false;
+                seen[key] = true;
+                return true;
+            })
+            .slice(0, 12);
+    }
+
+    function parseMemoryResult(text) {
+        var raw = String(text || '').trim();
+        var fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+        if (fenced) raw = fenced[1].trim();
+        var parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (e) {
+            throw new Error('记忆抽取未返回有效 JSON');
+        }
+        var content = String((parsed && parsed.content) || '').trim();
+        var keywords = normalizeKeywords(parsed && parsed.keywords);
+        if (!content) throw new Error('记忆正文为空');
+        if (keywords.length < 3) throw new Error('记忆关键词少于 3 个');
+        return { content: content, keywords: keywords };
+    }
+
     function formatTsPrefix(ts) {
         var t = Number(ts);
         if (!Number.isFinite(t) || t <= 0) return '';
@@ -93,7 +143,7 @@
 
     function resolveMemoryPrompt(contact, settings) {
         var custom = String((settings && settings.memoryAutoPrompt) || '').trim();
-        if (custom) return custom;
+        if (custom) return custom + '\n\n' + MEMORY_OUTPUT_CONTRACT;
         var name = (contact && (contact.remarkName || contact.name)) || '角色';
         return DEFAULT_MEMORY_PROMPT.replace('从角色视角', '从「' + name + '」的视角');
     }
@@ -166,19 +216,70 @@
                     endIndex: Math.max(1, e - n)
                 });
             }
-            return row;
+            return Object.assign({}, row, { sourceRangeMissing: true });
         });
     }
 
-    function buildCharMemoryContextBlock(chatSettings) {
-        if (chatSettings && chatSettings.memoryInterop === false) return '';
+    function isLegacyFixedMemory(row) {
+        return !!(row && !Array.isArray(row.keywords));
+    }
+
+    function isFixedMemory(row) {
+        return !!(row && (row.fixedInject === true || isLegacyFixedMemory(row)));
+    }
+
+    function selectCharMemories(chatSettings, queryText, debug) {
         var list = chatSettings && Array.isArray(chatSettings.charMemoryList) ? chatSettings.charMemoryList : [];
-        if (!list.length) return '';
-        var lines = list
+        var query = String(queryText || '').toLowerCase();
+        var fixed = [];
+        var recalled = [];
+        if (debug && typeof debug === 'object') {
+            debug.queryText = String(queryText || '');
+            debug.memoryInterop = !(chatSettings && chatSettings.memoryInterop === false);
+            debug.candidateCount = list.length;
+            debug.fixedCount = 0;
+            debug.recalledCount = 0;
+            debug.matches = [];
+        }
+        if (chatSettings && chatSettings.memoryInterop === false) return [];
+        if (!list.length) return [];
+        list.forEach(function (row) {
+            if (!row || !String(row.content || '').trim()) return;
+            if (isFixedMemory(row)) {
+                fixed.push(row);
+                return;
+            }
+            var hits = normalizeKeywords(row.keywords).filter(function (keyword) {
+                return query && query.indexOf(keyword.toLowerCase()) >= 0;
+            });
+            if (!hits.length) return;
+            recalled.push({ row: row, hitCount: hits.length, hits: hits });
+        });
+        fixed.sort(function (a, b) {
+            return (Number(a.startIndex) || Number(a.createdAt) || 0) -
+                (Number(b.startIndex) || Number(b.createdAt) || 0);
+        });
+        recalled.sort(function (a, b) {
+            if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
+            return (Number(b.row.updatedAt || b.row.createdAt) || 0) -
+                (Number(a.row.updatedAt || a.row.createdAt) || 0);
+        });
+        var selectedRecalled = recalled.slice(0, 5);
+        if (debug && typeof debug === 'object') {
+            debug.fixedCount = fixed.length;
+            debug.recalledCount = selectedRecalled.length;
+            debug.matches = selectedRecalled.map(function (item) {
+                return { id: String(item.row.id || ''), keywords: item.hits.slice() };
+            });
+        }
+        return fixed.concat(selectedRecalled.map(function (item) { return item.row; }));
+    }
+
+    function buildCharMemoryContextBlock(chatSettings, queryText, debug) {
+        var selected = selectCharMemories(chatSettings, queryText, debug);
+        if (!selected.length) return '';
+        var lines = selected
             .slice()
-            .sort(function (a, b) {
-                return (Number(a && a.startIndex) || 0) - (Number(b && b.startIndex) || 0);
-            })
             .map(function (row, i) {
                 var body = String((row && row.content) || '').trim();
                 if (!body) return '';
@@ -254,8 +355,19 @@
         }
         if (start > end) return Promise.resolve(false);
 
-        var excerpt = history
-            .slice(start - 1, end)
+        var sourceRows = history.slice(start - 1, end);
+        if (opts.requireCompleteRange) {
+            if (sourceRows.length !== end - start + 1 || sourceRows.some(function (m) { return !m || m.deleted; })) {
+                if (!silent && global.miyaDialog && global.miyaDialog.alert) {
+                    global.miyaDialog.alert({
+                        title: '无法重新提取',
+                        message: '对应的原始聊天记录不完整，旧记忆已保留。'
+                    });
+                }
+                return Promise.resolve(false);
+            }
+        }
+        var excerpt = sourceRows
             .map(function (m) {
                 return messageLine(m, contact, profile);
             })
@@ -303,18 +415,56 @@
             .then(function (data) {
                 var text = extractText(data);
                 if (!text) throw new Error('empty_memory');
-                var list = Array.isArray(settings.charMemoryList) ? settings.charMemoryList.slice() : [];
-                list.push({
-                    id: newMemoryId(),
-                    date: new Date().toLocaleString('zh-CN'),
-                    startIndex: start,
-                    endIndex: end,
-                    content: text,
-                    createdAt: Date.now()
+                var result = parseMemoryResult(text);
+                var replaceId = String(opts.replaceMemoryId || '').trim();
+                var confirmation = true;
+                if (replaceId && opts.confirmReplace) {
+                    var confirmMessage = result.content + '\n\n关键词：' + result.keywords.join('、');
+                    confirmation = global.miyaDialog && typeof global.miyaDialog.confirm === 'function'
+                        ? global.miyaDialog.confirm({
+                              title: '确认替换这条记忆？',
+                              message: confirmMessage,
+                              confirmText: '替换',
+                              cancelText: '保留旧记忆'
+                          })
+                        : Promise.resolve(global.confirm('确认替换这条记忆？\n\n' + confirmMessage));
+                }
+                return Promise.resolve(confirmation).then(function (confirmed) {
+                    if (!confirmed) return false;
+                    var list = Array.isArray(settings.charMemoryList) ? settings.charMemoryList.slice() : [];
+                    if (replaceId) {
+                        var found = false;
+                        list = list.map(function (row) {
+                            if (!row || row.id !== replaceId) return row;
+                            found = true;
+                            return Object.assign({}, row, {
+                                content: result.content,
+                                keywords: result.keywords,
+                                fixedInject: isFixedMemory(row),
+                                updatedAt: Date.now()
+                            });
+                        });
+                        if (!found) throw new Error('memory_not_found');
+                    } else {
+                        list.push({
+                            id: newMemoryId(),
+                            date: new Date().toLocaleString('zh-CN'),
+                            startIndex: start,
+                            endIndex: end,
+                            content: result.content,
+                            keywords: result.keywords,
+                            fixedInject: false,
+                            source: 'auto',
+                            createdAt: Date.now()
+                        });
+                    }
+                    return store.saveChatSettings(cid, { charMemoryList: list }).then(function () {
+                        return true;
+                    });
                 });
-                return store.saveChatSettings(cid, { charMemoryList: list });
             })
-            .then(function () {
+            .then(function (saved) {
+                if (!saved) return false;
                 if (
                     global.miyaMemoryApp &&
                     typeof global.miyaMemoryApp.onCharMemoryUpdated === 'function'
@@ -345,6 +495,10 @@
         lastCharMemoryEnd: lastCharMemoryEnd,
         countAssistantRounds: countAssistantRounds,
         adjustCharMemoryIndicesAfterPurge: adjustCharMemoryIndicesAfterPurge,
+        normalizeKeywords: normalizeKeywords,
+        parseMemoryResult: parseMemoryResult,
+        isFixedMemory: isFixedMemory,
+        selectCharMemories: selectCharMemories,
         buildCharMemoryContextBlock: buildCharMemoryContextBlock,
         isGenerating: function (chatId) {
             return !!generating[String(chatId || '')];
