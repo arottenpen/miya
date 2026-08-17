@@ -6,7 +6,9 @@
 
 # 本地杂项
 .cursor/
+.claude/
 
 # 二改文档与本地规则（不上传）
 doc/
 CLAUDE.md
+AGENTS.md
