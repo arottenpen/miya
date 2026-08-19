@@ -599,7 +599,7 @@
             '- 【单聊硬性边界】必须遵守下文「运转规则」「线上格式规则」：每轮 <thinking> → 正文 → <miyavoice> 三段式\n' +
             '- 【用户消息】用户普通文字无前缀；连发多条时以「 / 」分隔（仅分隔符，非正文）；引用时一次只能引用其中一条，勿把多条拼进同一行「引用-」；仅上下文里以「语音-」开头的才是语音条，勿把普通文字当语音回应\n' +
             '- 【禁止混用群聊格式】正文禁止「角色名：」多角色格式；群聊摘录/记忆仅作剧情参考，不得把群聊输出格式带入本单聊\n' +
-            '- 提示词顺序：全局 → 用户身份 → 关系 → 世界书 → 线上格式 → … → 联系人档案 → 思维链 → 运转规则（置末，紧挨生成前）'
+            '- 提示词顺序：全局 → 用户身份 → 关系 → 联系人档案 → 思维链 → 运转规则 → 感知 → 世界书 → 线上格式 → 历史与本轮消息'
         );
     }
 
@@ -1367,8 +1367,8 @@
     }
 
     /**
-     * 系统提示词块顺序：世界书前 → 全局 → 模式 → 用户身份 → 关系 → 人际脉络 → 感知 → 世界书中 → 能力 → 线上格式
-     * （世界书后 / 联系人档案 / 思维链 / 运转规则在 buildApiMessages 末尾单独注入）
+     * 系统提示词块顺序：世界书前 → 全局 → 模式 → 用户身份 → 关系 → 人际脉络 → 联系人档案 → 思维链 → 运转规则 → 感知 → 世界书中 → 能力 → 线上格式
+     * （世界书后仍在 buildApiMessages 末尾按既有深度注入）
      */
     function buildSystemPrompt(input) {
         var cfg = input && typeof input === 'object' ? input : {};
@@ -1390,17 +1390,28 @@
         var userBlock = renderProfileBlock(profile);
         if (userBlock) parts.push(userBlock);
 
-        var avatarBlock = buildAvatarRecognitionBlock(chatSettings, contact, profile);
-        if (avatarBlock) parts.push(avatarBlock);
-        appendDynamicAvatarContextBlock(parts, chatSettings, contact, profile);
-        appendAlbumContextBlock(parts, profile, contact, chatSettings);
-
         if (aw) {
             var relLine = aw.buildRelationshipLine(chatSettings, contact);
             if (relLine) parts.push(relLine);
             var netBlock = aw.buildChronicleRelationshipBlock(contact);
             if (netBlock) parts.push(netBlock);
         }
+
+        if (cfg.includeChronicle === true) {
+            var chronicle = renderChronicleBlock(contact);
+            if (chronicle) parts.push(chronicle);
+        }
+        if (cfg.includeOnlineLongRules === true) {
+            var thinkingBlock = resolveOnlineThinkingRulesBlock(contact, profile, chatSettings);
+            if (thinkingBlock) parts.push(thinkingBlock);
+            var operationBlock = resolveOnlineOperationRulesBlock(contact, profile, chatSettings);
+            if (operationBlock) parts.push(operationBlock);
+        }
+
+        var avatarBlock = buildAvatarRecognitionBlock(chatSettings, contact, profile);
+        if (avatarBlock) parts.push(avatarBlock);
+        appendDynamicAvatarContextBlock(parts, chatSettings, contact, profile);
+        appendAlbumContextBlock(parts, profile, contact, chatSettings);
 
         buildAwarenessBlocks(chatSettings, contact, profile, history).forEach(function (b) {
             parts.push(b);
@@ -1419,16 +1430,6 @@
         var outputParts = parts.filter(Boolean);
         var outputText = outputParts.join('\n\n');
         return cfg.returnParts ? { text: outputText, parts: outputParts } : outputText;
-    }
-
-    /** 线上单聊：联系人档案（含人设与背景）置末注入，紧挨运转规则之前 */
-    function appendChronicleBeforeOperationRulesMessage(apiMessages, contact, opts) {
-        opts = opts && typeof opts === 'object' ? opts : {};
-        if (!Array.isArray(apiMessages)) return;
-        if (opts.callMode || opts.appointmentMode) return;
-        var chronicle = renderChronicleBlock(contact);
-        if (!chronicle) return;
-        apiMessages.push({ role: 'system', content: chronicle });
     }
 
     /** 思维链：风格指引（可被自定义预设覆盖） */
@@ -1456,7 +1457,7 @@
         return getThinkingRulesFormatTailItems().join('\n');
     }
 
-    /** 思维链：置末注入（运转规则之前） */
+    /** 思维链：长期规则块，普通线上单聊前置于动态感知与历史 */
     function buildThinkingRules(contact, profile) {
         return (
             '【思维链·必读】\n' +
@@ -1475,47 +1476,45 @@
         );
     }
 
-    /** 线上单聊：思维链置末注入（联系人档案之后、运转规则之前） */
-    function appendOnlineThinkingRulesMessage(apiMessages, contact, profile, opts) {
-        opts = opts && typeof opts === 'object' ? opts : {};
-        if (!Array.isArray(apiMessages)) return;
-        if (opts.callMode || opts.appointmentMode || opts.isMomentsAuto) return;
+    function resolveOnlineThinkingRulesBlock(contact, profile, chatSettings) {
         var block = null;
         var thMod = global.MiyaChatThinkingRules;
         if (thMod && typeof thMod.resolveForChat === 'function') {
-            block = thMod.resolveForChat(opts.chatSettings, contact, profile);
+            block = thMod.resolveForChat(chatSettings, contact, profile);
         }
         if (!block) block = resolveConversationMode(contact) === 'native'
             ? buildNativeThinkingRules(contact, profile)
             : buildThinkingRules(contact, profile);
-        if (!block) return;
-        apiMessages.push({ role: 'system', content: block });
+        return block || '';
     }
 
-    /** 线上单聊：运转规则置末注入（所有其它 system / 历史 / 本轮块 / 联系人档案之后） */
-    function appendOnlineOperationRulesMessage(apiMessages, contact, profile, opts) {
-        opts = opts && typeof opts === 'object' ? opts : {};
-        if (!Array.isArray(apiMessages)) return;
-        if (opts.callMode || opts.appointmentMode || opts.isMomentsAuto) return;
+    function resolveOnlineOperationRulesBlock(contact, profile, chatSettings) {
         var block = null;
         var opMod = global.MiyaChatOperationRules;
         if (opMod && typeof opMod.resolveForChat === 'function') {
-            block = opMod.resolveForChat(opts.chatSettings, contact, profile);
+            block = opMod.resolveForChat(chatSettings, contact, profile);
         }
         if (!block) block = resolveConversationMode(contact) === 'native'
             ? buildNativeOperationRules(contact, profile)
             : buildOperationRules(contact, profile);
-        if (!block) return;
         var hvTpl = global.MiyaChatHeartVoiceTemplates;
         var hvPreset =
             hvTpl && typeof hvTpl.resolvePresetForChat === 'function'
-                ? hvTpl.resolvePresetForChat(opts.chatSettings)
+                ? hvTpl.resolvePresetForChat(chatSettings)
                 : null;
         if (hvPreset && typeof hvTpl.rewriteDefaultHeartVoiceMentions === 'function') {
             block = hvTpl.rewriteDefaultHeartVoiceMentions(block);
         }
-        apiMessages.push({ role: 'system', content: block });
-        /* 自定义心声：再置末一条最高优先级块，确保提示词真正压过默认四行 */
+        return block || '';
+    }
+
+    function appendCustomHeartVoicePriorityMessage(apiMessages, contact, chatSettings) {
+        if (!Array.isArray(apiMessages)) return;
+        var hvTpl = global.MiyaChatHeartVoiceTemplates;
+        var hvPreset =
+            hvTpl && typeof hvTpl.resolvePresetForChat === 'function'
+                ? hvTpl.resolvePresetForChat(chatSettings)
+                : null;
         if (hvPreset && typeof hvTpl.buildCustomHeartVoicePriorityBlock === 'function') {
             var roleName = String((contact && contact.name) || '角色');
             var hvPriority = hvTpl.buildCustomHeartVoicePriorityBlock(roleName, hvPreset);
@@ -2052,8 +2051,8 @@
         transfer: '待确认转账',
         per_turn_inject: '本轮注入（格式/心声/单聊锁定）',
         chronicle: '角色档案（人设·背景）',
-        operation_rules: '运转规则·必读（置末）',
-        thinking_rules: '思维链·必读（置末）',
+        operation_rules: '运转规则·必读（前置）',
+        thinking_rules: '思维链·必读（前置）',
         call: '通话态指令',
         call_vision: '通话画面/视觉',
         group_memory: '群聊记忆摘录',
@@ -2238,6 +2237,9 @@
                     key = 'worldbook';
                 }
             }
+            if (text.indexOf('【角色·档案·') === 0) key = 'chronicle';
+            else if (text.indexOf('【思维链·必读】') === 0 || text.indexOf('【思维链·自定义】') === 0) key = 'thinking_rules';
+            else if (text.indexOf('【运转规则·必读】') === 0 || text.indexOf('【运转规则·自定义】') === 0) key = 'operation_rules';
             sourceParts.push({ key: key, text: text });
         });
         return sourceParts;
@@ -3065,6 +3067,8 @@
                   worldbookFrontLayers: wbBundle.frontLayers,
                   worldbookLayers: wbBundle.layers,
                   globalPrompt: globalPrompt,
+                  includeChronicle: !opts.appointmentMode,
+                  includeOnlineLongRules: !opts.appointmentMode && !opts.isMomentsAuto,
                   returnParts: true
               });
         var systemContent = systemBuild && typeof systemBuild === 'object' ? systemBuild.text : systemBuild;
@@ -3544,7 +3548,6 @@
             worldbookBackCount = normalizeLayerList(wbBundle.backLayers).length;
             worldbookBackMessages = apiMessages.slice(worldbookBackStart);
         }
-        appendChronicleBeforeOperationRulesMessage(apiMessages, contact, opts);
         if (
             historyTailState === 'assistant_spoke_last' &&
             !opts.callMode &&
@@ -3586,18 +3589,9 @@
                 });
             }
         }
-        appendOnlineThinkingRulesMessage(
-            apiMessages,
-            contact,
-            profile,
-            Object.assign({}, opts, { chatSettings: settings })
-        );
-        appendOnlineOperationRulesMessage(
-            apiMessages,
-            contact,
-            profile,
-            Object.assign({}, opts, { chatSettings: settings })
-        );
+        if (!opts.callMode && !opts.appointmentMode && !opts.isMomentsAuto) {
+            appendCustomHeartVoicePriorityMessage(apiMessages, contact, settings);
+        }
 
         var completeSourceMeta = buildCompletePromptSourceMeta(apiMessages, {
             mainMessage: mainSystemMessage,

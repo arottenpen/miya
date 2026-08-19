@@ -658,8 +658,8 @@
       });
       if (!hit) {
         var labels = {
-          operation_rules: '运转规则·必读（置首）',
-          thinking_rules: '思维链·必读（置末）'
+          operation_rules: '运转规则·必读（前置）',
+          thinking_rules: '思维链·必读（前置）'
         };
         breakdown.grouped.push({
           key: key,
