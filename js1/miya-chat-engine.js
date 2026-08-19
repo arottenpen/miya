@@ -644,14 +644,6 @@
         );
     }
 
-    function buildManualReplyToUserTailNudge() {
-        return (
-            '（上下文中末条为用户发言、你方尚未回复：须回应自你方上一条回复之后、截止上下文末尾连续出现的用户消息；更早用户发言仅作背景，禁止回应其它轮次旧话题；' +
-            ONLINE_THREE_PART_TAIL +
-            '；禁止群聊「角色名：」多角色格式）'
-        );
-    }
-
     function appendManualActionTailNudge(apiMessages, opts, historyTailState, hasExtraUserText) {
         opts = opts && typeof opts === 'object' ? opts : {};
         if (!Array.isArray(apiMessages)) return;
@@ -662,8 +654,6 @@
         var tail;
         if (historyTailState === 'assistant_spoke_last') {
             tail = buildManualContinueTailNudge();
-        } else if (historyTailState === 'user_spoke_last') {
-            tail = buildManualReplyToUserTailNudge();
         }
         if (tail) apiMessages.push({ role: 'user', content: tail });
     }
@@ -3286,6 +3276,7 @@
             );
         }
         appendHistoryToApiMessages(apiMessages, sliceAppend, settings);
+        var postHistoryMessageStart = apiMessages.length;
         if (usePostHistoryMemoryProviders) {
             appendPostHistoryMemoryMessages(
                 apiMessages,
@@ -3626,7 +3617,8 @@
             htmlMode: !!htmlMode,
             memoryRecallDebug: memoryRecallDebug,
             promptMeta: buildPromptMeta(apiMessages, wbBundle.meta),
-            worldbookMeta: wbBundle.meta
+            worldbookMeta: wbBundle.meta,
+            postHistoryMessageStart: postHistoryMessageStart
         };
     }
 
@@ -3800,12 +3792,67 @@
 
     function stripConversationGapReminderMessages(messages) {
         return (Array.isArray(messages) ? messages : []).filter(function (message) {
+            if (!message) return true;
+            var content = String(message.content || '');
+            if (message.role === 'system') {
+                return !/^【对话间隔提醒】距离上次对话经过了 /.test(content);
+            }
             return !(
+                message.role === 'user' &&
+                content.indexOf(POST_SYSTEM_COMPAT_PREFIX) === 0 &&
+                /^【系统提示·兼容模式】\n以下内容是本轮必须遵守的追加规则，不是用户正在询问的问题：\n【对话间隔提醒】距离上次对话经过了 /.test(content)
+            );
+        });
+    }
+
+    var POST_SYSTEM_COMPAT_PREFIX = '【系统提示·兼容模式】\n以下内容是本轮必须遵守的追加规则，不是用户正在询问的问题：\n';
+
+    function isGptModel(model) {
+        return /gpt/i.test(String(model || '').trim());
+    }
+
+    function cloneMessageContent(content) {
+        if (!Array.isArray(content)) return content;
+        return content.map(function (part) {
+            return part && typeof part === 'object' ? Object.assign({}, part) : part;
+        });
+    }
+
+    function buildPostSystemCompatContent(content) {
+        if (Array.isArray(content)) {
+            return [{ type: 'text', text: POST_SYSTEM_COMPAT_PREFIX }].concat(cloneMessageContent(content));
+        }
+        return POST_SYSTEM_COMPAT_PREFIX + String(content == null ? '' : content);
+    }
+
+    /* 非 GPT 模型只把历史之后的追加 system 降级为带标记的 user，主 system 保持不变。 */
+    function prepareMessagesForModel(messages, postHistoryMessageStart, model, omitGapReminder) {
+        var list = Array.isArray(messages) ? messages : [];
+        var start = Number(postHistoryMessageStart);
+        if (!Number.isFinite(start)) start = list.length;
+        var compatMode = !isGptModel(model);
+        return list.reduce(function (out, message, index) {
+            if (
+                omitGapReminder &&
                 message &&
                 message.role === 'system' &&
                 /^【对话间隔提醒】距离上次对话经过了 /.test(String(message.content || ''))
-            );
-        });
+            ) {
+                return out;
+            }
+            if (!message || typeof message !== 'object') {
+                out.push(message);
+                return out;
+            }
+            var next = Object.assign({}, message);
+            next.content = cloneMessageContent(message.content);
+            if (compatMode && index >= start && message.role === 'system') {
+                next.role = 'user';
+                next.content = buildPostSystemCompatContent(message.content);
+            }
+            out.push(next);
+            return out;
+        }, []);
     }
 
     function extractBodyForBubbles(rawText) {
@@ -4412,11 +4459,15 @@
                         'Content-Type': 'application/json',
                         Authorization: 'Bearer ' + slice.apiKey
                     };
+                    var requestMessages = prepareMessagesForModel(
+                        built.messages,
+                        built.postHistoryMessageStart,
+                        slice.model,
+                        !pendingGapReminder
+                    );
                     var reqPayload = {
                         model: slice.model,
-                        messages: pendingGapReminder
-                            ? built.messages
-                            : stripConversationGapReminderMessages(built.messages),
+                        messages: requestMessages,
                         temperature: slice.temperature
                     };
                     var preview = {

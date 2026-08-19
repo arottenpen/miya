@@ -1285,6 +1285,7 @@
                 '以下消息均来自本群（非单聊）；阅读时留意每行开头的「角色名：」或「用户名：」。'
         });
         appendGroupHistory(apiMessages, slice, members, profile, settings, store, chatId);
+        var postHistoryMessageStart = apiMessages.length;
         if (opts.conversationGapReminder) {
             apiMessages.push({ role: 'system', content: String(opts.conversationGapReminder) });
         }
@@ -1425,6 +1426,7 @@
             latestHumanRole: slice.length ? slice[slice.length - 1].role : '',
             htmlMode: false,
             promptMeta: promptMeta,
+            postHistoryMessageStart: postHistoryMessageStart,
             worldbookMeta: Object.assign({ scope: 'group' }, wbBundle.meta || {}, {
                 matchedSummary: wbBundle.meta && wbBundle.meta.matchedSummary
                     ? wbBundle.meta.matchedSummary
