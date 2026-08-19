@@ -2624,8 +2624,9 @@
 
     /**
      * 按设定 memoryCount 从尾部取最近可注入消息。
-     * 线上气泡、线下镜像、可注入系统旁白/胶囊等一律按一条计入名额（与设定条数一致）。
-     * 保持时间线原序；空壳不计。
+     * memoryCount 是基础上下文条数：窗口起点按阶梯推进，允许在边界之间
+     * 暂时多带少量历史，避免每轮新增消息都改写缓存前缀。线上气泡、线下镜像、
+     * 可注入系统旁白/胶囊等一律按一条历史记录计数；空壳不计。
      */
     function sliceHistoryForApiContext(history, limit) {
         var list = Array.isArray(history) ? history : [];
@@ -2635,7 +2636,10 @@
         list.forEach(function (m) {
             if (getHistoryRowApiBody(m, fmtHist)) eligible.push(m);
         });
-        return eligible.length <= lim ? eligible.slice() : eligible.slice(-lim);
+        if (eligible.length <= lim) return eligible.slice();
+        var step = Math.max(6, Math.min(24, Math.ceil(lim / 2)));
+        var start = Math.floor((eligible.length - lim) / step) * step;
+        return eligible.slice(start);
     }
 
     /**
@@ -3014,16 +3018,28 @@
             ? Math.min(500, Math.max(1, settings.memoryCount))
             : HISTORY_LIMIT;
         /*
-         * 每次触发回复都从 store 现读时间线：按 memoryCount 注入最近完整一段
-         *（用户 / 角色 / 可注入系统消息 / 线下镜像，各占 1 条名额），顺序与时刻不改写。
-         * 已沉淀的分镜/合卷只作为【长期记忆】系统块；不从本窗口剔除原文，以免少注、断档。
-         * 线下镜像同样进入分镜/合卷总结时间线（带〔线下〕标记）。
+         * 每次触发回复都从 store 现读时间线：按 memoryCount 的基础窗口取最近历史，
+         * 窗口起点按阶梯推进；用户 / 角色 / 可注入系统消息 / 线下镜像各占 1 条历史记录。
+         * 已沉淀的分镜/合卷原文从历史副本剔除，只保留长期记忆系统块；线下镜像同样进入
+         * 分镜/合卷总结时间线（带〔线下〕标记）。
          */
         var historyForAppend = filterOfflineMirrorsFromApiHistory(
             history,
             apiChatId,
             contact && contact.id
         );
+        var summaryMod = global.MiyaChatSummary;
+        if (
+            summaryMod &&
+            typeof summaryMod.filterCoveredHistoryForContext === 'function' &&
+            settings
+        ) {
+            historyForAppend = summaryMod.filterCoveredHistoryForContext(
+                apiChatId,
+                historyForAppend,
+                settings
+            );
+        }
         var sliceAppend = sliceHistoryForApiContext(historyForAppend, limit);
         var sliceContext = sliceAppend;
         if (opts.isRegenerate) {
@@ -3166,9 +3182,9 @@
                 ? memExtract.buildCharMemoryContextBlock(settings, memoryQueryText, memoryRecallDebug)
                 : '';
         var usePostHistoryMemoryProviders = !opts.callMode && !opts.appointmentMode;
-        if (!usePostHistoryMemoryProviders) {
-            if (summaryBlock) apiMessages.push({ role: 'system', content: summaryBlock });
-            if (charMemBlock) apiMessages.push({ role: 'system', content: charMemBlock });
+        if (summaryBlock) apiMessages.push({ role: 'system', content: summaryBlock });
+        if (!usePostHistoryMemoryProviders && charMemBlock) {
+            apiMessages.push({ role: 'system', content: charMemBlock });
         }
         var mmApi = global.MiyaChatMoments;
         var momentsBlock =
@@ -3227,9 +3243,6 @@
         }
         var hasPostHistoryCrossMemory = !!(offSumText || hasOfflineMirror || offlineCrossSlots.length);
         var builtinPostHistoryMemoryMessages = [];
-        if (usePostHistoryMemoryProviders && summaryBlock) {
-            builtinPostHistoryMemoryMessages.push({ role: 'system', content: summaryBlock });
-        }
         if (usePostHistoryMemoryProviders && charMemBlock) {
             builtinPostHistoryMemoryMessages.push({ role: 'system', content: charMemBlock });
         }

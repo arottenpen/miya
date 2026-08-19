@@ -33,6 +33,7 @@
         return (prefix || 'sum') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
     }
     var generating = {};
+    var ROLLING_RECENT_ROUNDS = 2;
 
     function clampInt(v, lo, hi, fallback) {
         var n = parseInt(v, 10);
@@ -143,6 +144,48 @@
         return mx;
     }
 
+    /** 返回上次水位之后每个完整角色回复轮次的结束序号；多气泡只计一轮。 */
+    function collectCompletedRoundEnds(history, afterOneBasedEndIndex) {
+        var rows = Array.isArray(history) ? history : [];
+        var start = clampInt(afterOneBasedEndIndex, 0, rows.length, 0);
+        var fmt = global.MiyaChatOnlineFormat;
+        var ends = [];
+        var seenBatch = {};
+        var legacyRoundOpen = false;
+        for (var i = start; i < rows.length; i++) {
+            var m = rows[i];
+            if (!m || m.deleted) continue;
+            if (m.role === 'user') {
+                legacyRoundOpen = false;
+                seenBatch = {};
+                continue;
+            }
+            var isNarration = !!(
+                m.role === 'system' &&
+                fmt &&
+                typeof fmt.isOnlineNarrationMessage === 'function' &&
+                fmt.isOnlineNarrationMessage(m)
+            );
+            if (m.role !== 'assistant' && !isNarration) continue;
+            var batch = String(m.replyBatchId || '').trim();
+            if (batch) {
+                if (!seenBatch[batch]) {
+                    seenBatch[batch] = true;
+                    ends.push(i + 1);
+                } else if (ends.length) {
+                    ends[ends.length - 1] = i + 1;
+                }
+                legacyRoundOpen = false;
+            } else if (!legacyRoundOpen) {
+                ends.push(i + 1);
+                legacyRoundOpen = true;
+            } else if (ends.length) {
+                ends[ends.length - 1] = i + 1;
+            }
+        }
+        return ends;
+    }
+
     function messageIndexCovered(idx, ranges) {
         if (!idx || !ranges || !ranges.length) return false;
         for (var i = 0; i < ranges.length; i++) {
@@ -241,6 +284,14 @@
         return out;
     }
 
+    function filterCoveredHistoryForContext(chatId, history, settings) {
+        var covered = collectCoveredMessageIdSet(chatId, settings);
+        if (!Object.keys(covered).length) return Array.isArray(history) ? history.slice() : [];
+        return (Array.isArray(history) ? history : []).filter(function (m) {
+            return m && !covered[messageFingerprint(m)];
+        });
+    }
+
     /** 合卷覆盖水位：maxEnd = 所有合卷 endIndex 最大值 */
     function getMegaCoverageWatermark(megaList) {
         var maxEnd = 0;
@@ -287,15 +338,25 @@
         var list = settings && Array.isArray(settings.summaryList) ? settings.summaryList : [];
         var megaList = settings && Array.isArray(settings.megaSummaryList) ? settings.megaSummaryList : [];
         var covered = summaryIdsCoveredByMega(megaList);
+        var rolling = list
+            .filter(function (row) { return row && row.autoRolling === true && String(row.content || '').trim(); })
+            .sort(function (a, b) { return (Number(b.endIndex) || 0) - (Number(a.endIndex) || 0); })[0] || null;
+        var rollingEnd = rolling ? Number(rolling.endIndex) || 0 : 0;
         var megaInjected = 0;
         var shotInjected = 0;
         var shotSkipped = 0;
         var chars = 0;
         var megaChars = 0;
         var shotChars = 0;
+        var rollingChars = 0;
+        if (rolling) {
+            rollingChars = String(rolling.content || '').trim().length;
+            chars += rollingChars;
+        }
         megaList.forEach(function (row) {
             var body = String((row && row.content) || '').trim();
             if (!body) return;
+            if (rollingEnd && Number(row && row.endIndex) > 0 && Number(row.endIndex) <= rollingEnd) return;
             megaInjected += 1;
             megaChars += body.length;
             chars += body.length;
@@ -303,6 +364,8 @@
         list.forEach(function (row) {
             var body = String((row && row.content) || '').trim();
             if (!body) return;
+            if (row && row.autoRolling === true) return;
+            if (rollingEnd && Number(row && row.endIndex) > 0 && Number(row.endIndex) <= rollingEnd) return;
             if (isSummaryShotCovered(row, megaList, covered)) {
                 shotSkipped += 1;
                 return;
@@ -319,6 +382,8 @@
             shotSkipped: shotSkipped,
             megaChars: megaChars,
             shotChars: shotChars,
+            rollingInjected: rolling ? 1 : 0,
+            rollingChars: rollingChars,
             contentChars: chars
         };
     }
@@ -422,9 +487,8 @@
         var history = getSummaryTimeline(store, chatId);
         if (!history.length) return;
         var last = lastSummaryEnd(settings);
-        /* 历史变短时夹到末尾，禁止重置为 0（否则会 silent 重扫整卷并失败） */
         if (last > history.length) last = history.length;
-        if (history.length - last < trigger) return;
+        if (collectCompletedRoundEnds(history, last).length < trigger) return;
         performSummary(chatId, { silent: true });
     }
 
@@ -473,7 +537,12 @@
             var last = lastSummaryEnd(settings);
             if (last > history.length) last = history.length;
             start = last + 1;
-            if (start > history.length) return Promise.resolve(false);
+            var trigger = clampInt(settings.summaryTrigger, 1, 500, 1);
+            var completedEnds = collectCompletedRoundEnds(history, last);
+            if (completedEnds.length < trigger || completedEnds.length <= ROLLING_RECENT_ROUNDS) {
+                return Promise.resolve(false);
+            }
+            end = completedEnds[completedEnds.length - ROLLING_RECENT_ROUNDS - 1];
         } else {
             start = clampInt(startInput, 1, history.length, 1);
             end = clampInt(endInput, 1, history.length, history.length);
@@ -504,7 +573,18 @@
             }
             return Promise.resolve(false);
         }
-        var promptText = resolveSummaryPrompt(settings, Object.assign({}, opts, { isGroup: isGroup })) + '\n\n' + excerpt;
+        var priorRollingText = '';
+        var awareness = global.MiyaChatAwareness;
+        if (awareness && typeof awareness.buildSummaryContextBlock === 'function') {
+            priorRollingText = String(awareness.buildSummaryContextBlock(settings) || '').trim();
+        }
+        var promptText = resolveSummaryPrompt(settings, Object.assign({}, opts, { isGroup: isGroup }));
+        if (priorRollingText) {
+            promptText +=
+                '\n\n以下是上一版滚动摘要。请以新对话为准，修正冲突并删除已经解决的内容：\n' +
+                priorRollingText;
+        }
+        promptText += '\n\n' + excerpt;
         generating[cid] = true;
         var summaryMessages = [{ role: 'user', content: promptText }];
         var eng = global.miyaChatEngine;
@@ -531,14 +611,30 @@
                 var summaryText = extractText(data);
                 if (!summaryText) throw new Error('empty_summary');
                 var list = Array.isArray(settings.summaryList) ? settings.summaryList.slice() : [];
-                list.push({
+                var nextRow = {
                     id: newSummaryId('sum'),
                     date: new Date().toLocaleString('zh-CN'),
                     startIndex: start,
                     endIndex: end,
                     content: summaryText,
                     createdAt: Date.now()
-                });
+                };
+                if (silent) {
+                    nextRow.autoRolling = true;
+                    nextRow.startIndex = 1;
+                    var replaced = false;
+                    list = list.filter(function (row) {
+                        if (row && row.autoRolling === true) {
+                            if (!replaced) {
+                                replaced = true;
+                                return false;
+                            }
+                            return false;
+                        }
+                        return true;
+                    });
+                }
+                list.push(nextRow);
                 return store.saveChatSettings(cid, { summaryList: list });
             })
             .then(function () {
@@ -748,6 +844,8 @@
         isSummaryShotCovered: isSummaryShotCovered,
         inspectSummaryInjection: inspectSummaryInjection,
         collectCoveredMessageIdSet: collectCoveredMessageIdSet,
+        filterCoveredHistoryForContext: filterCoveredHistoryForContext,
+        rollingRecentRounds: ROLLING_RECENT_ROUNDS,
         messageFingerprint: messageFingerprint,
         getSummaryTimeline: getSummaryTimeline,
         isGenerating: function (chatId) {

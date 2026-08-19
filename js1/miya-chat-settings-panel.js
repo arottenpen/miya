@@ -165,8 +165,9 @@
       '</div>' +
       '<div class="miya-ct-card">' +
         '<p class="miya-ct-card__kicker">记忆</p>' +
-        fieldRow('上下文条数', '<input type="number" class="miya-ct-input" id="' + prefix + '-memory-count" min="1" max="500" value="40">') +
-        fieldRow('自动总结触发', '<input type="number" class="miya-ct-input" id="' + prefix + '-summary-trigger" min="0" max="500" value="0">') +
+        fieldRow('基础上下文条数', '<input type="number" class="miya-ct-input" id="' + prefix + '-memory-count" min="1" max="500" value="40">') +
+        '<p class="miya-ct-row__hint">历史窗口按阶梯推进，实际可能暂时多带少量消息，以保持提示缓存稳定。</p>' +
+        fieldRow('自动总结触发（回复轮数）', '<input type="number" class="miya-ct-input" id="' + prefix + '-summary-trigger" min="0" max="500" value="0">') +
       '</div>' +
       '<div class="miya-ct-card">' +
         '<p class="miya-ct-card__kicker">后台消息</p>' +

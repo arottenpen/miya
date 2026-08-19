@@ -1157,15 +1157,29 @@
         var list = chatSettings && Array.isArray(chatSettings.summaryList) ? chatSettings.summaryList : [];
         var megaList = chatSettings && Array.isArray(chatSettings.megaSummaryList) ? chatSettings.megaSummaryList : [];
         if (!list.length && !megaList.length) return '';
+        var rolling = list
+            .filter(function (row) { return row && row.autoRolling === true && String(row.content || '').trim(); })
+            .sort(function (a, b) { return (Number(b.endIndex) || 0) - (Number(a.endIndex) || 0); })[0] || null;
+        var rollingEnd = rolling ? Number(rolling.endIndex) || 0 : 0;
         var sumMod = global.MiyaChatSummary;
         var covered =
             sumMod && typeof sumMod.summaryIdsCoveredByMega === 'function'
                 ? sumMod.summaryIdsCoveredByMega(megaList)
                 : {};
         var items = [];
+        if (rolling) {
+            items.push({
+                order: 0,
+                text:
+                    '【滚动总结 · 已覆盖至消息' +
+                    String(rolling.endIndex || '?') + '】\n' +
+                    String(rolling.content || '').trim()
+            });
+        }
         megaList.forEach(function (row, mi) {
             var body = String((row && row.content) || '').trim();
             if (!body) return;
+            if (rollingEnd && Number(row.endIndex) > 0 && Number(row.endIndex) <= rollingEnd) return;
             items.push({
                 order: Number(row && row.startIndex) || 0,
                 text:
@@ -1180,6 +1194,8 @@
             });
         });
         list.forEach(function (row, i) {
+            if (row && row.autoRolling === true) return;
+            if (rollingEnd && Number(row && row.endIndex) > 0 && Number(row.endIndex) <= rollingEnd) return;
             if (
                 sumMod &&
                 typeof sumMod.isSummaryShotCovered === 'function'
@@ -1211,7 +1227,7 @@
         if (!lines.length) return '';
         return (
             '【长期记忆·对话总结】\n' +
-            '以下为已沉淀的对话记忆（含合卷与未被合并的分镜），每轮请求均须阅读；与下方「上下文对话」衔接，勿与近期原文重复叙述。\n\n' +
+            '以下为已沉淀的对话记忆（滚动总结优先，另含尚未并入滚动总结的合卷与分镜），每轮请求均须阅读；与下方「上下文对话」衔接，勿与近期原文重复叙述。\n\n' +
             lines.join('\n\n')
         );
     }

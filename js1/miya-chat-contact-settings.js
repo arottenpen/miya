@@ -996,6 +996,7 @@
         sub =
           '实际注入 ' +
           formatNum(actualChars || 0) +
+          (si.rollingInjected ? ' · 滚动总结 ' + formatNum(si.rollingChars || 0) + '字' : '') +
           ' 字 · 合卷 ' +
           (si.megaInjected || 0) +
           '（' +
@@ -1042,7 +1043,7 @@
         '<div class="mi-ctx-detail-pop__body">' +
           '<section class="mi-ctx-detail__section">' +
             '<h4 class="mi-ctx-detail__heading">下次请求 · Prompt 注入（' + esc(formatNum(snapshot.messageCount || 0)) + ' 条 message）</h4>' +
-            '<p class="mi-ctx-detail__hint">以下为当前设置下，下一条消息将发往 API 的上下文构成。字符数按实际 request body 统计；Token 为本地粗算（中文约 1.6 字/token，与 API 账单可能略有出入）。「对话总结记忆」只统计以【长期记忆·对话总结】开头的系统块：已并入合卷的分镜不应再出现。</p>' +
+            '<p class="mi-ctx-detail__hint">以下为当前设置下，下一条消息将发往 API 的上下文构成。字符数按实际 request body 统计；Token 为本地粗算（中文约 1.6 字/token，与 API 账单可能略有出入）。基础上下文条数按阶梯窗口取历史，实际可能暂时多带少量消息；已被滚动总结覆盖的原文不应再出现。</p>' +
               (snapshot.summaryInject
               ? '<p class="mi-ctx-inject' +
                 ((snapshot.summaryInject.actualInjectedChars || snapshot.summaryInject.contentChars || 0) > 5000
@@ -1062,7 +1063,9 @@
                 esc(formatNum(snapshot.summaryInject.megaInjected)) +
                 '（' +
                 esc(formatNum(snapshot.summaryInject.megaChars || 0)) +
-                '字）/ 分镜 ' +
+                '字）' +
+                (snapshot.summaryInject.rollingInjected ? ' · 滚动总结 ' + esc(formatNum(snapshot.summaryInject.rollingChars || 0)) + '字' : '') +
+                ' / 分镜 ' +
                 esc(formatNum(snapshot.summaryInject.shotInjected)) +
                 '（跳过 ' +
                 esc(formatNum(snapshot.summaryInject.shotSkipped)) +
