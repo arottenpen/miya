@@ -1,27 +1,16 @@
 /**
  * Miya 线上运转规则 · 预设库（设置软件编辑）+ 各聊天选用
- * 自定义按条添加（名称 + 开关）；关闭的条目不注入；末尾格式条序号随启用条数顺延
+ * 自定义按条添加（名称 + 开关）；关闭的条目不注入；启用预设时完整替换默认运转规则
  */
 (function (global) {
   'use strict';
 
   var PRESETS_LS = 'miya-chat-operation-rules-presets-v1';
   var EXPORT_FORMAT = 'miya-operation-rules';
-  var PANEL_RENDER_VER = '9';
+  var PANEL_RENDER_VER = '10';
   var presetsCache = null; // null=未加载, []=已加载但为空, 非空=有数据
   var presetsReady = null;
   var settingsBound = false;
-
-  /** 与 engine 内置格式条一致；engine 未就绪时仍保证能 compose */
-  var DEFAULT_FORMAT_TAIL_ITEMS = [
-    '每一轮须按顺序输出三段：<thinking> → 正文（每行一气泡，必须换行）→ <miyavoice>；禁止一大坨无换行文字',
-    '世界书已注入系统提示，你必须在 <thinking> 中体现对当前生效世界书条目的消化，并在正文中落实',
-    '发送前必须回顾上下文中你方近期已发原文：禁止频繁重复相同话题、相同描写/意象、相同动作套路、相同句式或同质化撒娇/抱怨；<miyavoice> 各字段也不得与近几轮雷同；主动找话题时勿反复提天气，勿复制上一轮结构与节奏',
-    '正文每行仅一条气泡，且整轮正文只输出一遍；禁止相同句子/气泡行出现两次；引用时「引用-摘抄」独占一行，每条回复各占一行',
-    '每轮末尾必须按照要求完整输出 <miyavoice> 心声段，须严格按当前「线上格式规则·心声」中定义的字段逐行写满（字段名与行数以该规则为准），禁止省略、禁止截断；心声字段行不得出现在正文气泡里',
-    '禁止编造关于用户的经历、共同回忆、偏好或说过/做过的事：仅可使用上下文中已明确出现的对话原文，以及系统注入的长期记忆/角色记忆/朋友圈记忆、联系人档案与用户档案；无依据时不得假称「记得」「上次你说」「我们以前」等',
-    '须通读上下文中按时间顺序注入的完整近期对话（用户与角色的消息均已包含；开启时间感知时须逐条区分双方发言早晚）后再回复：衔接取决于对话最新状态——若上下文末条为用户新发言，则按该消息真实发送时刻回应；若上几条已是你方发言而用户未回，则从你方最近一条自然续写或推进；判断用户失联多久须按用户上次发言起算'
-  ];
 
   function esc(s) {
     return String(s || '')
@@ -65,36 +54,6 @@
     return String(text || '').replace(/^\d+[、.．]\s*/, '').trim();
   }
 
-  function formatNumberedLines(items, startNum) {
-    var n = Math.max(1, parseInt(startNum, 10) || 1);
-    return (items || [])
-      .map(function (text) {
-        return stripLeadingNumber(text);
-      })
-      .filter(Boolean)
-      .map(function (text, i) {
-        return n + i + '、' + text;
-      })
-      .join('\n');
-  }
-
-  function getFormatTailItems() {
-    var eng = global.MiyaChatEngine;
-    if (eng && typeof eng.getOperationRulesFormatTailItems === 'function') {
-      var fromEng = eng.getOperationRulesFormatTailItems();
-      if (Array.isArray(fromEng) && fromEng.length) return fromEng.slice();
-    }
-    return DEFAULT_FORMAT_TAIL_ITEMS.slice();
-  }
-
-  function buildFormatTailFrom(startNum) {
-    var eng = global.MiyaChatEngine;
-    if (eng && typeof eng.buildOperationRulesFormatTailFrom === 'function') {
-      return String(eng.buildOperationRulesFormatTailFrom(startNum) || '').trim();
-    }
-    return formatNumberedLines(getFormatTailItems(), startNum);
-  }
-
   function parseLegacyTextToItems(text) {
     var body = String(text || '').trim();
     if (!body) return [];
@@ -133,19 +92,19 @@
   function normalizeItemRow(raw) {
     if (raw == null) return null;
     if (typeof raw === 'string') {
-      var st = stripLeadingNumber(raw.trim());
+      var st = raw.trim();
       if (!st) return null;
       return { name: '', text: st, enabled: true };
     }
     if (typeof raw !== 'object') {
-      var asStr = stripLeadingNumber(String(raw).trim());
+      var asStr = String(raw).trim();
       if (!asStr) return null;
       return { name: '', text: asStr, enabled: true };
     }
     var text = raw.text != null
       ? raw.text
       : (raw.content != null ? raw.content : (raw.body != null ? raw.body : ''));
-    text = stripLeadingNumber(String(text || '').trim());
+    text = String(text || '').trim();
     var name = String(raw.name != null ? raw.name : (raw.title != null ? raw.title : '')).trim().slice(0, 64);
     var enabled = coerceEnabled(
       raw.enabled != null ? raw.enabled : (raw.on != null ? raw.on : raw.active),
@@ -356,13 +315,10 @@
         ? customItems
         : (customItems || []).map(function (t) { return { text: t, enabled: true }; })
     ).map(function (t) {
-      return stripLeadingNumber(applyVariables(t, contact, profile));
+      return applyVariables(t, contact, profile).trim();
     }).filter(Boolean);
     if (!texts.length) return null;
-    var head = formatNumberedLines(texts, 1);
-    var tail = buildFormatTailFrom(texts.length + 1);
-    if (!tail) tail = formatNumberedLines(DEFAULT_FORMAT_TAIL_ITEMS, texts.length + 1);
-    return '【运转规则·必读】\n' + head + '\n' + tail;
+    return '【运转规则·自定义】\n' + texts.join('\n');
   }
 
   function resolvePresetName(chatSettings) {
@@ -448,7 +404,7 @@
 
   function buildItemRowHtml(index, item) {
     var row = normalizeItemRow(item) || { name: '', text: '', enabled: true };
-    if (typeof item === 'string') row = { name: '', text: stripLeadingNumber(item), enabled: true };
+    if (typeof item === 'string') row = { name: '', text: String(item).trim(), enabled: true };
     var on = row.enabled !== false;
     return '<article class="mi-oprules-card' + (on ? '' : ' is-off') + '" data-mq-oprules-item>' +
       '<div class="mi-oprules-card__top">' +
@@ -497,7 +453,7 @@
       var ta = row.querySelector('[data-mq-oprules-item-text]');
       var sw = row.querySelector('[data-mq-oprules-item-enabled]');
       var name = nameEl ? String(nameEl.value || '').trim().slice(0, 64) : '';
-      var text = stripLeadingNumber(String((ta && ta.value) || '').trim());
+      var text = String((ta && ta.value) || '').trim();
       var enabled = !(sw && !sw.classList.contains('is-on'));
       if (!text && !keepEmpty) return;
       out.push({ name: name, text: text, enabled: enabled });
