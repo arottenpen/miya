@@ -1368,13 +1368,13 @@
                 var grpManualTail;
                 if (grpTailState === 'assistant_spoke_last') {
                     grpManualTail =
-                        '（请继续本群对话：上下文末条为成员发言、用户尚未回复；从最近成员发言续写，禁止重答用户旧话；格式「角色名：内容」）';
+                        '（请继续本群对话：上下文末条为成员发言、用户尚未回复；从最近成员发言自然续写，禁止重答旧话或复读上轮。）';
                 } else if (grpTailState === 'user_spoke_last') {
                     grpManualTail =
-                        '（请角色们根据上文回复：上下文末条为用户发言、成员尚未回复；须回应用户最新消息；格式「角色名：内容」，可多成员接话；禁止 <heartvoice>）';
+                        '（请角色们根据上文回复：上下文末条为用户发言、成员尚未回复；须回应用户最新消息。）';
                 } else {
                     grpManualTail =
-                        '（请角色们根据上文回复：格式「角色名：内容」，可多成员接话；禁止 <heartvoice>）';
+                        '（请角色们根据上文继续本群对话。）';
                 }
                 apiMessages.push({ role: 'user', content: grpManualTail });
             }
