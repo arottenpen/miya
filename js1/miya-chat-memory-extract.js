@@ -339,13 +339,16 @@
             .map(function (row, i) {
                 var body = String((row && row.content) || '').trim();
                 if (!body) return '';
+                var rangeLabel = row && row.source === 'manual'
+                    ? ''
+                    : ' · 消息' +
+                        String(row.startIndex || '?') +
+                        '-' +
+                        String(row.endIndex || '?');
                 return (
                     '【角色记忆' +
                     String(i + 1) +
-                    ' · 消息' +
-                    String(row.startIndex || '?') +
-                    '-' +
-                    String(row.endIndex || '?') +
+                    rangeLabel +
                     '】\n' +
                     body
                 );

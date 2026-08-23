@@ -272,6 +272,9 @@
     var charMemBlocks = charMemList.map(function (row, i) {
       var memMod = global.MiyaChatMemoryExtract;
       var fixed = memMod && memMod.isFixedMemory ? memMod.isFixedMemory(row) : !!row.fixedInject;
+      var rangeLabel = row.source === 'manual'
+        ? '忆'
+        : '忆 · 第 ' + row.startIndex + '–' + row.endIndex + ' 条';
       var extraActions =
         '<button type="button" class="mm-clip__edit" data-toggle-cmem-fixed="' + esc(row.id) + '">' +
           (fixed ? '取消固定' : '固定') +
@@ -281,7 +284,7 @@
           : '<button type="button" class="mm-clip__edit" data-reextract-cmem="' + esc(row.id) + '">重新提取</button>');
       return '<article class="mm-clip mm-clip--char" data-cmem-id="' + esc(row.id) + '">' +
         '<header class="mm-clip__head">' +
-          '<strong>忆 · 第 ' + row.startIndex + '–' + row.endIndex + ' 条</strong>' +
+          '<strong>' + rangeLabel + '</strong>' +
           clipHeadActions('data-edit-cmem', 'data-del-cmem', row.id, '', extraActions) +
         '</header>' +
         renderClipContent(row, 'cmem', row.id) +
