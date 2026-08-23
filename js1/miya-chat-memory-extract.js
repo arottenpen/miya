@@ -9,7 +9,8 @@
         '{"title":"简短明确的记忆主题","content":"80-200字的角色视角长期记忆","keywords":["具体关键词1","具体关键词2","具体关键词3"]}。' +
         'title 必填，概括这条记忆的具体主题；' +
         'keywords 至少 3 个、最多 12 个，只写未来对话中可能自然出现的具体人物、地点、事件、物品、约定或偏好；' +
-        '不要使用“记忆、聊天、用户、角色、事情、关系”等泛词，不要堆叠同义词。';
+        '每个关键词都必须能帮助区分并召回这条具体记忆；不得用当前角色姓名、昵称、用户姓名、双方日常称呼、代词或泛词凑数；' +
+        '优先复用原对话中实际出现的事件用词和口语表达，同一事件可以补充少量未来可能自然出现的短语变体，但每个变体必须单独作为数组元素；不要堆叠无关同义词。';
 
     var DEFAULT_MEMORY_PROMPT =
         '阅读以下对话，从角色视角提取对其重要的记忆：情感转折、约定与承诺、喜好与禁忌、关系变化、关键事件与细节。' +
@@ -98,7 +99,52 @@
             .slice(0, 12);
     }
 
-    function parseMemoryResult(text) {
+    function addKeywordExclusion(map, value) {
+        var key = String(value || '').trim().toLowerCase();
+        if (key) map[key] = true;
+    }
+
+    function buildKeywordExclusions(contact, profile, settings) {
+        var excluded = {};
+        Object.keys(GENERIC_KEYWORDS).forEach(function (key) {
+            excluded[key] = true;
+        });
+        addKeywordExclusion(excluded, contact && contact.name);
+        addKeywordExclusion(excluded, contact && contact.remarkName);
+        addKeywordExclusion(excluded, profile && profile.name);
+
+        var ext = settings && settings.externalMemory && typeof settings.externalMemory === 'object'
+            ? settings.externalMemory
+            : {};
+        var groups = ext.synonyms && typeof ext.synonyms === 'object' && !Array.isArray(ext.synonyms)
+            ? ext.synonyms
+            : {};
+        Object.keys(groups).forEach(function (base) {
+            var group = groups[base];
+            var terms = Array.isArray(group)
+                ? group
+                : group && Array.isArray(group.terms)
+                    ? group.terms
+                    : [];
+            var tags = group && Array.isArray(group.tags) ? group.tags : [];
+            var generic = !!(group && group.generic === true) || tags.some(function (tag) {
+                return String(tag || '').trim().toLowerCase() === 'generic';
+            });
+            if (!generic) return;
+            addKeywordExclusion(excluded, base);
+            terms.forEach(function (term) { addKeywordExclusion(excluded, term); });
+        });
+        return excluded;
+    }
+
+    function filterMemoryKeywords(value, exclusions) {
+        var excluded = exclusions && typeof exclusions === 'object' ? exclusions : {};
+        return normalizeKeywords(value).filter(function (keyword) {
+            return !excluded[String(keyword || '').trim().toLowerCase()];
+        });
+    }
+
+    function parseMemoryResult(text, exclusions) {
         var raw = String(text || '').trim();
         var fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
         if (fenced) raw = fenced[1].trim();
@@ -110,10 +156,10 @@
         }
         var content = String((parsed && parsed.content) || '').trim();
         var title = String((parsed && parsed.title) || '').trim();
-        var keywords = normalizeKeywords(parsed && parsed.keywords);
+        var keywords = filterMemoryKeywords(parsed && parsed.keywords, exclusions);
         if (!title) throw new Error('记忆标题为空');
         if (!content) throw new Error('记忆正文为空');
-        if (keywords.length < 3) throw new Error('记忆关键词少于 3 个');
+        if (keywords.length < 3) throw new Error('记忆有效关键词少于 3 个（称呼、泛词或 generic 同义词不计入）');
         return { title: title.slice(0, 160), content: content, keywords: keywords };
     }
 
@@ -144,11 +190,18 @@
         return formatTsPrefix(m.createdAt) + who + body;
     }
 
-    function resolveMemoryPrompt(contact, settings) {
+    function resolveMemoryPrompt(contact, settings, profile) {
         var custom = String((settings && settings.memoryAutoPrompt) || '').trim();
-        if (custom) return custom + '\n\n' + MEMORY_OUTPUT_CONTRACT;
-        var name = (contact && (contact.remarkName || contact.name)) || '角色';
-        return DEFAULT_MEMORY_PROMPT.replace('从角色视角', '从「' + name + '」的视角');
+        var prompt = custom || DEFAULT_MEMORY_PROMPT.replace('从角色视角', '从「' + (((contact && (contact.remarkName || contact.name)) || '角色')) + '」的视角');
+        var excludedNames = [
+            contact && contact.name,
+            contact && contact.remarkName,
+            profile && profile.name
+        ].map(function (value) { return String(value || '').trim(); }).filter(Boolean);
+        if (excludedNames.length) {
+            prompt += '\n本次提炼中，以下当前对话参与者的姓名、昵称或称呼不得作为关键词：' + excludedNames.join('、') + '。';
+        }
+        return custom ? prompt + '\n\n' + MEMORY_OUTPUT_CONTRACT : prompt;
     }
 
     function lastCharMemoryEnd(settings) {
@@ -392,7 +445,7 @@
             return Promise.resolve(false);
         }
 
-        var promptText = resolveMemoryPrompt(contact, settings) + '\n\n' + excerpt;
+        var promptText = resolveMemoryPrompt(contact, settings, profile) + '\n\n' + excerpt;
         generating[cid] = true;
         var memoryMessages = [{ role: 'user', content: promptText }];
         var eng = global.miyaChatEngine;
@@ -418,7 +471,7 @@
             .then(function (data) {
                 var text = extractText(data);
                 if (!text) throw new Error('empty_memory');
-                var result = parseMemoryResult(text);
+                var result = parseMemoryResult(text, buildKeywordExclusions(contact, profile, settings));
                 var replaceId = String(opts.replaceMemoryId || '').trim();
                 var confirmation = true;
                 if (replaceId && opts.confirmReplace) {
