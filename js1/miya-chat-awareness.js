@@ -540,6 +540,10 @@
                 end -= 1;
                 continue;
             }
+            if (row.type === 'proactive_context') {
+                end -= 1;
+                continue;
+            }
             if (row.role === 'user') {
                 end -= 1;
                 continue;
@@ -555,6 +559,7 @@
         for (var i = history.length - 1; i >= 0; i--) {
             var row = history[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (row.role !== 'user') break;
             n += 1;
         }
@@ -571,6 +576,7 @@
         for (var i = history.length - 1; i >= 0; i--) {
             var row = history[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (roleFilter === 'user' && row.role !== 'user') continue;
             if (roleFilter === 'assistant' && row.role !== 'assistant') continue;
             var t = Number(row.createdAt);

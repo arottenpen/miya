@@ -3,6 +3,8 @@
 
     var HISTORY_LIMIT = 40;
     var USER_MSG_JOIN = ' / ';
+    var PROACTIVE_CONTEXT_TEXT =
+        '【历史记录说明】紧接着的模型侧消息是模型主动发起的联系，不是对用户上一条消息的普通回复，也不是本轮新任务。';
     var THINKING_EXTRACT_SEQ = [
         /<thinking>([\s\S]*?)<\/thinking>/i,
         /＜thinking＞([\s\S]*?)＜\/thinking＞/i,
@@ -971,6 +973,7 @@
         for (var i = history.length - 1; i >= 0; i--) {
             var row = history[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             /* 与 appendHistory 一致：已 omit 的空壳/回执等不参与末条判定 */
             if (fmt && typeof fmt.shouldOmitMessage === 'function' && fmt.shouldOmitMessage(row)) {
                 continue;
@@ -2679,6 +2682,15 @@
         }
         history.forEach(function (m) {
             if (!m || m.deleted) return;
+            if (m.type === 'proactive_context') {
+                flushUser();
+                flushAssistant();
+                apiMessages.push({
+                    role: 'user',
+                    content: String(m.content || PROACTIVE_CONTEXT_TEXT)
+                });
+                return;
+            }
             if (m.role === 'system' && m.type === 'diary_peek_context') {
                 var peekBlock =
                     fmtHist && typeof fmtHist.formatDiaryPeekContextForApi === 'function'
@@ -4883,6 +4895,21 @@
                         chain = chain.then(function (acc) {
                             return appendNarrationAfterBubble(acc, -1);
                         });
+                        if (options.isAutoPush || options.isLifeLike) {
+                            chain = chain.then(function (acc) {
+                                if (!parsedBubbles || !parsedBubbles.length) return acc;
+                                return store
+                                    .addMessage(chatId, {
+                                        role: 'user',
+                                        type: 'proactive_context',
+                                        content: PROACTIVE_CONTEXT_TEXT,
+                                        createdAt: replyBaseTs - 1
+                                    })
+                                    .then(function () {
+                                        return acc;
+                                    });
+                            });
+                        }
                         for (var bubbleIdx = 0; bubbleIdx < parsedBubbles.length; bubbleIdx++) {
                             (function (fields, unitIndex) {
                                 chain = chain.then(function (acc) {

@@ -2564,6 +2564,7 @@
     function isRealTimelineMessage(m, opts) {
         opts = opts && typeof opts === 'object' ? opts : {};
         if (!m || (m.role !== 'user' && m.role !== 'assistant')) return false;
+        if (m.type === 'proactive_context') return false;
         if (m.offlineMeet || isMomentsMemoryRow(m)) return false;
         if (m.deleted) return false;
         return hasPersistableMessageBody(m);
@@ -2571,6 +2572,7 @@
 
     function isHistoricalTimelineAnchor(m) {
         if (!m || (m.role !== 'user' && m.role !== 'assistant')) return false;
+        if (m.type === 'proactive_context') return false;
         if (m.offlineMeet || isMomentsMemoryRow(m)) return false;
         if (normalizeConversationGap(m.conversationGap)) return true;
         if (m.deleted) return false;
@@ -4400,7 +4402,13 @@
             if (!Array.isArray(arr)) return [];
             return arr
                 .filter(function (m) {
-                    return m && !m.deleted && !m.offlineMeet && !isMomentsMemoryRow(m);
+                    return (
+                        m &&
+                        !m.deleted &&
+                        !m.offlineMeet &&
+                        m.type !== 'proactive_context' &&
+                        !isMomentsMemoryRow(m)
+                    );
                 })
                 .map(normalizeMessage);
         },
@@ -4417,7 +4425,15 @@
             var i;
             for (i = arr.length - 1; i >= 0; i--) {
                 var raw = arr[i];
-                if (!raw || raw.deleted || raw.offlineMeet || isMomentsMemoryRow(raw)) continue;
+                if (
+                    !raw ||
+                    raw.deleted ||
+                    raw.offlineMeet ||
+                    raw.type === 'proactive_context' ||
+                    isMomentsMemoryRow(raw)
+                ) {
+                    continue;
+                }
                 total++;
                 if (picked.length < lim) picked.push(raw);
             }

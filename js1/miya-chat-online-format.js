@@ -849,6 +849,7 @@
         for (i = list.length - 1; i >= 0; i--) {
             var row = list[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (row.role === 'assistant') break;
             if (isCharacterOnlineNarrationMessage(row)) break;
             if (row.role === 'user') round.unshift(row);
@@ -2444,7 +2445,7 @@
     }
 
     function shouldHideFromUi(m) {
-        return isAlbumAvatarChangeMessage(m);
+        return isAlbumAvatarChangeMessage(m) || !!(m && m.type === 'proactive_context');
     }
 
     function isRoomInvisibleMessage(m) {

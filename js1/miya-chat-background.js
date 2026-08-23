@@ -42,6 +42,7 @@
         for (var i = list.length - 1; i >= 0; i--) {
             var row = list[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (roleFilter === 'user' && row.role !== 'user') continue;
             if (roleFilter === 'assistant' && row.role !== 'assistant') continue;
             var t = pickTs(row.createdAt);
@@ -74,6 +75,7 @@
         for (var i = list.length - 1; i >= 0; i--) {
             var row = list[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (row.role !== 'user' && row.role !== 'assistant') continue;
             var t = pickTs(row.createdAt);
             if (t) return t;
@@ -368,6 +370,7 @@
         for (var i = msgs.length - 1; i >= 0; i--) {
             var row = msgs[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (fmt && typeof fmt.shouldOmitMessage === 'function' && fmt.shouldOmitMessage(row)) {
                 continue;
             }
@@ -388,6 +391,7 @@
         for (var i = hist.length - 1; i >= 0; i--) {
             var row = hist[i];
             if (!row || row.deleted) continue;
+            if (row.type === 'proactive_context') continue;
             if (row.role === 'assistant') break;
             if (row.role === 'user' && String(row.content || '').trim()) {
                 lines.unshift(String(row.content).trim());
@@ -410,6 +414,7 @@
         for (i = hist.length - 1; i >= 0 && picked.length < lim; i--) {
             var m = hist[i];
             if (!m || m.deleted) continue;
+            if (m.type === 'proactive_context') continue;
             if (fmt && typeof fmt.shouldOmitMessage === 'function' && fmt.shouldOmitMessage(m)) {
                 continue;
             }

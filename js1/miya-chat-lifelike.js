@@ -92,7 +92,7 @@
         roleTz = roleTz || resolveRoleTz(null);
         var today = aw.wallClockPartsInTz(now, roleTz);
         var tsToday = parseWallClock(roleTz, today.year, today.month, today.day, hour, minute);
-        if (tsToday) return tsToday;
+        if (tsToday > now) return tsToday;
         var tomorrowAnchor = now + 86400000;
         var tp = aw.wallClockPartsInTz(tomorrowAnchor, roleTz);
         return parseWallClock(roleTz, tp.year, tp.month, tp.day, hour, minute);
@@ -117,7 +117,8 @@
             var h = iso[4] != null ? parseInt(iso[4], 10) : 12;
             var mi = iso[5] != null ? parseInt(iso[5], 10) : 0;
             var ts = parseWallClock(roleTz, y, mo, d, h, mi);
-            if (ts) return { ok: true, atMs: ts };
+            if (ts && ts > now) return { ok: true, atMs: ts };
+            if (ts && ts <= now) return { ok: false, reason: 'past' };
             if (iso[4] == null) {
                 return { ok: false, reason: 'missing_time' };
             }
@@ -133,7 +134,8 @@
         if (/^\d{13,}$/.test(s)) {
             var msNum = parseInt(s, 10);
             var msTs = finalizeScheduleTs(msNum);
-            if (msTs) return { ok: true, atMs: msTs };
+            if (msTs > now) return { ok: true, atMs: msTs };
+            if (msTs && msTs <= now) return { ok: false, reason: 'past' };
         }
 
         return { ok: false, reason: 'unrecognized' };
@@ -325,6 +327,7 @@
             for (var i = msgs.length - 1; i >= 0; i--) {
                 var row = msgs[i];
                 if (!row || row.deleted) continue;
+                if (row.type === 'proactive_context') continue;
                 var t = pickTs(row.createdAt);
                 if (!t) continue;
                 if (!lastMsgTs) lastMsgTs = t;
