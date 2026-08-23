@@ -207,7 +207,7 @@
         var nowTs = Date.now();
         var lines = [
             '【让TA自己决定何时找你 · 强制末段】',
-            '本单聊已开启「让TA自己决定何时找你」。你必须在完整输出 <thinking> → 正文气泡 → <miyavoice> 全部结束之后，',
+            '本单聊已开启「让TA自己决定何时找你」。你必须在完整输出 <thinking> → 正文气泡（以及按当前心声规则要求的可选 <miyavoice>）全部结束之后，',
             '另起一行输出且仅输出一行用户绝对不可见的调度块，格式严格如下：',
             TAG_OPEN + 'YYYY-MM-DD HH:mm' + TAG_CLOSE,
             '- 时间为' +
@@ -307,7 +307,7 @@
         }
         lines.push(
             '内容自然、贴合人设与当下实际时刻；默认不要强调过了多久；禁止复读近期相同话题套路。',
-            '仍须完整输出 <thinking> → 正文气泡 → <miyavoice> 三段式；结束后必须再输出 ' +
+            '仍须完整输出 <thinking> → 正文气泡；<miyavoice> 是否输出及字段要求以当前单聊心声规则为准；结束后必须再输出 ' +
                 TAG_OPEN +
                 'YYYY-MM-DD HH:mm' +
                 TAG_CLOSE +

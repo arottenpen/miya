@@ -255,7 +255,7 @@
       '</p>' +
       '<ul class="mi-oprules-think-guide__list">' +
         '<li>用普通文字描述「怎么想」，<strong>不要写</strong> <code>&lt;thinking&gt;</code> / <code>&lt;/thinking&gt;</code> 标签</li>' +
-        '<li>标签由角色<strong>每轮回复时</strong>自行输出；运转规则会规定 <code>&lt;thinking&gt; → 正文 → &lt;miyavoice&gt;</code> 三段式</li>' +
+        '<li><code>&lt;thinking&gt;</code> 由角色每轮回复时自行输出；<code>&lt;miyavoice&gt;</code> 是否输出及字段要求以当前线上心声规则为准</li>' +
         '<li>可用占位符 <code>{{角色名}}</code>、<code>{{用户名}}</code></li>' +
         '<li>末尾「格式硬性要求」由系统自动追加，无需手写</li>' +
       '</ul>' +

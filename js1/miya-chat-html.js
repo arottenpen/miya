@@ -281,14 +281,14 @@
             return [
                 '【HTML 输出·世界书补充】',
                 '本轮已命中要求以 HTML 回复的世界书词条；请严格按该词条正文中的输出要求执行（优先级高于通用线上气泡格式）。',
-                '结构仍为：<thinking> → HTML 正文（```html``` 围栏或完整 HTML 标签）→ <miyavoice>（心声字段，每轮必填，格式见「线上格式规则·心声」）。',
+                '结构仍为：<thinking> → HTML 正文（```html``` 围栏或完整 HTML 标签）；<miyavoice> 是否输出及字段要求以「线上格式规则·心声」为准。',
                 'HTML 段内禁止语音-/表情包-/引用-等聊天气泡行；说明性文字写在 HTML 注释内。'
             ].join('\n');
         }
         return [
             '【HTML 交互页·本轮强制】',
-            '本轮输出顺序：<thinking> → HTML 正文 → <miyavoice>。',
-            '</thinking> 之后至 <miyavoice> 之前只输出一份完整 HTML。',
+            '本轮输出顺序：<thinking> → HTML 正文；<miyavoice> 是否输出及字段要求以「线上格式规则·心声」为准。',
+            '</thinking> 之后只输出一份完整 HTML；若追加 <miyavoice>，须放在 HTML 正文之后。',
             '优先用 ```html ... ``` 围栏；HTML 须自包含样式，适配手机竖屏。'
         ].join('\n');
     }

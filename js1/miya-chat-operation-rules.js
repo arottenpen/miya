@@ -65,15 +65,16 @@
       return single ? [normalizeItemRow(single)] : [];
     }
     var out = [];
+    var defaultTailStartRe = /(?:每一轮须按顺序输出三段|每一轮须先按顺序输出 <thinking> → 正文)/;
     var stripDefaultTail =
       body.indexOf('【运转规则') >= 0 &&
-      /每一轮须按顺序输出三段/.test(body);
+      defaultTailStartRe.test(body);
     var inFormatTail = false;
     lines.forEach(function (line) {
       var t = line.trim();
       if (!t) return;
       if (t.indexOf('【运转规则') === 0) return;
-      if (stripDefaultTail && /每一轮须按顺序输出三段/.test(t)) {
+      if (stripDefaultTail && defaultTailStartRe.test(t)) {
         inFormatTail = true;
       }
       if (inFormatTail) return;

@@ -598,7 +598,7 @@
             String((profile && profile.name) || '用户') +
             '」进行二人私聊（即时通讯），不是群聊。\n' +
             '- 语气需要自然、口语化，模拟真人发微信，不要油腻；根据人设与情绪善用 emoji、表情包、颜文字、标点节奏（…！！？？等）\n' +
-            '- 【单聊硬性边界】必须遵守下文「运转规则」「线上格式规则」：每轮 <thinking> → 正文 → <miyavoice> 三段式\n' +
+            '- 【单聊硬性边界】必须遵守下文「运转规则」「线上格式规则」：每轮先输出 <thinking> → 正文；<miyavoice> 是否输出及字段要求以当前「线上格式规则·心声」为准\n' +
             '- 【用户消息】用户普通文字无前缀；连发多条时以「 / 」分隔（仅分隔符，非正文）；引用时一次只能引用其中一条，勿把多条拼进同一行「引用-」；仅上下文里以「语音-」开头的才是语音条，勿把普通文字当语音回应\n' +
             '- 【禁止混用群聊格式】正文禁止「角色名：」多角色格式；群聊摘录/记忆仅作剧情参考，不得把群聊输出格式带入本单聊\n' +
             '- 提示词顺序：全局 → 用户身份 → 关系 → 联系人档案 → 思维链 → 运转规则 → 感知 → 世界书 → 线上格式 → 历史与本轮消息'
@@ -617,7 +617,7 @@
     }
 
     var ONLINE_THREE_PART_TAIL =
-        '仍须严格按顺序输出：<thinking>…</thinking> → 正文（每行一气泡，每条必须换行分隔，禁止空格/标点挤一行）→ <miyavoice>…</miyavoice>；正文只输出一遍，禁止先写草稿再复读；用户只能看到 </thinking> 与 <miyavoice> 之间；必须按照要求完整输出 miyavoice 模块（开闭标签与全部心声字段均不可缺），禁止省略思维链或心声、禁止截断心声、禁止挤成无换行的一大段。';
+        '仍须严格按顺序输出：<thinking>…</thinking> → 正文（每行一气泡，每条必须换行分隔，禁止空格/标点挤一行）；<miyavoice> 是否输出及字段要求以当前「线上格式规则·心声」为准，若输出则必须使用完整开闭标签并填满其中全部字段，禁止少填、空填或截断；正文只输出一遍，禁止先写草稿再复读；用户只能看到 </thinking> 之后的正文，心声不得泄漏到正文。';
 
     function buildOnlineProactiveTailNudge() {
         return '（请主动发一条新消息：先读全上文带时间戳的历史；从对话最新状态续聊；默认勿报时；' + ONLINE_THREE_PART_TAIL + '）';
@@ -842,11 +842,11 @@
      * 心声字段细则只在「线上格式规则·心声」中定义：系统默认四行或自定义预设二选一，此处不写死四行。 */
     function getOperationRulesFormatTailItems() {
         return [
-            '每一轮须按顺序输出三段：<thinking> → 正文（每行一气泡，必须换行）→ <miyavoice>；禁止一大坨无换行文字',
+            '每一轮须先按顺序输出 <thinking> → 正文（每行一气泡，必须换行）；<miyavoice> 是否输出及字段要求以当前「线上格式规则·心声」为准，若输出则必须完整写满其中全部字段；禁止一大坨无换行文字',
             '世界书已注入系统提示，你必须在 <thinking> 中体现对当前生效世界书条目的消化，并在正文中落实',
             '发送前必须回顾上下文中你方近期已发原文：禁止频繁重复相同话题、相同描写/意象、相同动作套路、相同句式或同质化撒娇/抱怨；<miyavoice> 各字段也不得与近几轮雷同；主动找话题时勿反复提天气，勿复制上一轮结构与节奏',
             '正文每行仅一条气泡，且整轮正文只输出一遍；禁止相同句子/气泡行出现两次；引用时「引用-摘抄」独占一行，每条回复各占一行',
-            '每轮末尾必须按照要求完整输出 <miyavoice> 心声段，须严格按当前「线上格式规则·心声」中定义的字段逐行写满（字段名与行数以该规则为准），禁止省略、禁止截断；心声字段行不得出现在正文气泡里',
+            '<miyavoice> 是否输出以当前「线上格式规则·心声」为准；若本轮输出心声段，须严格按其中定义的字段逐行写满（字段名与行数以该规则为准），禁止少填、空填、截断；心声字段行不得出现在正文气泡里',
             '禁止编造关于用户的经历、共同回忆、偏好或说过/做过的事：仅可使用上下文中已明确出现的对话原文，以及系统注入的长期记忆/角色记忆/朋友圈记忆、联系人档案与用户档案；无依据时不得假称「记得」「上次你说」「我们以前」等',
             '须通读上下文中按时间顺序注入的完整近期对话（用户与角色的消息均已包含；开启时间感知时须逐条区分双方发言早晚）后再回复：衔接取决于对话最新状态——若上下文末条为用户新发言，则按该消息真实发送时刻回应；若上几条已是你方发言而用户未回，则从你方最近一条自然续写或推进，禁止每条回复都重新瞄准用户更早的旧句当作「本轮必答对象」；判断用户失联多久须按用户上次发言起算'
         ];
@@ -1756,6 +1756,22 @@
         return '';
     }
 
+    function hasClosedHeartVoiceBlock(rawText) {
+        var src = String(rawText || '');
+        return [
+            /<miyavoice>[\s\S]*?<\/miyavoice\s*>/i,
+            /＜miyavoice＞[\s\S]*?＜\/miyavoice＞/i,
+            /<heartvoice>[\s\S]*?<\/heartvoice\s*>/i,
+            /＜heartvoice＞[\s\S]*?＜\/heartvoice＞/i,
+            /<心声>[\s\S]*?<\/心声\s*>/i,
+            /＜心声＞[\s\S]*?＜／心声＞/i,
+            /【心声】[\s\S]*?【\/心声】/i,
+            /【心声】[\s\S]*?【／心声】/i
+        ].some(function (re) {
+            return re.test(src);
+        });
+    }
+
     function parseHeartVoiceFieldLine(line, allowedNames) {
         var raw = stripHeartVoiceTagFragments(trimLine(line));
         if (!raw) return null;
@@ -1933,7 +1949,12 @@
         var src = String(rawText || '');
         var inner = extractHeartVoiceBlock(src);
         var rawHasHeartVoiceTag = /<miyavoice|＜miyavoice|<heartvoice|＜heartvoice|<心声|＜心声|【心声】/i.test(src);
-        if (!inner) {
+        var isCustomMode = !!(
+            opts &&
+            Array.isArray(opts.fieldNames) &&
+            opts.fieldNames.filter(Boolean).length
+        );
+        if (!inner || (!isCustomMode && !hasClosedHeartVoiceBlock(src))) {
             return {
                 rawHasHeartVoiceTag: rawHasHeartVoiceTag,
                 extractedOk: false,
